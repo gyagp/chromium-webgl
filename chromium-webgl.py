@@ -11,8 +11,8 @@ from HTMLParser import HTMLParser
 
 boto_file = '.boto'
 cpu_count = multiprocessing.cpu_count()
-lkgr_count = 10
-lkgr_url = 'https://ci.chromium.org/p/chromium/builders/luci.chromium.ci/Win10%20FYI%20Release%20%28Intel%20HD%20630%29?limit=300'
+lkgr_count = 100
+lkgr_url = 'https://ci.chromium.org/p/chromium/builders/luci.chromium.ci/Win10%20FYI%20Release%20%28Intel%20HD%20630%29?limit=500'
 
 build_dir = ''
 chromium_dir = ''
