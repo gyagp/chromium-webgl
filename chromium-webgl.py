@@ -5,10 +5,15 @@ import multiprocessing
 import os
 import re
 import subprocess
+import urllib2
+from HTMLParser import HTMLParser
 
 
 boto_file = '.boto'
 cpu_count = multiprocessing.cpu_count()
+lkgr_count = 10
+lkgr_url = 'https://ci.chromium.org/p/chromium/builders/luci.chromium.ci/Win10%20FYI%20Release%20%28Intel%20HD%20630%29?limit=300'
+
 build_dir = ''
 chromium_dir = ''
 chromium_src_dir = ''
@@ -22,16 +27,15 @@ def parse_arg():
                                      formatter_class=argparse.RawTextHelpFormatter,
                                      epilog='''
 examples:
-  python %(prog)s --proxy <host>:<port> --sync --build
-  python %(prog)s --test
+  python %(prog)s --proxy <host>:<port> --build --build-revision <revision>
+  python %(prog)s --test --test-revision <revision>
 ''')
     parser.add_argument('--proxy', dest='proxy', help='proxy')
-    parser.add_argument('--sync', dest='sync', help='sync', action='store_true')
     parser.add_argument('--build', dest='build', help='build', action='store_true')
+    parser.add_argument('--build-revision', dest='build_revision', help='Chromium revision to build with')
     parser.add_argument('--test', dest='test', help='test', action='store_true')
-    parser.add_argument('--test-revision', dest='test_revision', help='Chromium revision')
-    parser.add_argument('--test-version', dest='test_version', help='WebGL CTS version to test against', default='1.0.3')
-    parser.add_argument('--test-filter', dest='test_filter', help='WebGL CTS suite to test against', default='conformance_attribs')
+    parser.add_argument('--test-revision', dest='test_revision', help='Chromium revision to test against', default='lkgr')
+    parser.add_argument('--test-filter', dest='test_filter', help='WebGL CTS suite to test against', default='all')  # For smoke test, we may use conformance_attribs
     args = parser.parse_args()
 
 
@@ -61,24 +65,51 @@ def setup():
         _setenv('NO_AUTH_BOTO_CONFIG', script_dir + '/' + boto_file)
 
 
-def sync():
-    if not args.sync:
-        return
-
-    _chdir(depot_tools_dir)
-    _exec('git pull')
-    _chdir(chromium_src_dir)
-    _exec('git pull')
-    _exec('gclient sync -R -j%s' % cpu_count)
-
-
 def build():
     if not args.build:
         return
 
+    # get revision hash
+    if args.build_revision:
+        rev_hash = args.build_revision
+    else:
+        try:
+            response = urllib2.urlopen(lkgr_url)
+            html = response.read()
+        except Exception:
+            _error('Failed to open %s' % lkgr_url)
+
+        parser = Parser()
+        parser.feed(html)
+
+        count = 0
+        for i in range(0, len(parser.rev_result)):
+            rev_hash = parser.rev_result[i][0]
+            result = parser.rev_result[i][1]
+            if result == 'Success':
+                count = count + 1
+            else:
+                count = 0
+            if count == lkgr_count:
+                break
+
+        if count == lkgr_count:
+            rev_hash = parser.rev_result[i + 1 - lkgr_count][0]
+            _info('The Last Known Good Revision is %s' % rev_hash)
+        else:
+            _error('Could not find Last Known Good Revision')
+
+    # sync code
+    _chdir(depot_tools_dir)
+    _exec('git pull')
     _chdir(chromium_src_dir)
+    _exec('git pull')
+
+    cmd = 'gclient sync -R -j%s --revision=%s' % (cpu_count, rev_hash)
+    _exec(cmd)
 
     # build Chromium
+    _chdir(chromium_src_dir)
     gn_args = 'proprietary_codecs=true ffmpeg_branding=\\\"Chrome\\\" is_official_build=true is_debug=false'
     gn_args += ' symbol_level=0 is_component_build=false use_jumbo_build=true remove_webcore_debug_symbols=true enable_nacl=false'
     cmd = 'gn --args=\"%s\" gen out/Default' % gn_args
@@ -114,6 +145,12 @@ def test():
 
     _chdir(build_dir)
     rev = args.test_revision
+    if rev == 'latest':
+        files = sorted(os.listdir('.'), reverse=True)
+        rev = files[0].replace('.zip', '')
+        if not re.match('\d{6}', rev):
+            _error('Could not find the correct revision')
+
     if not os.path.exists('%s' % rev):
         if not os.path.exists('%s.zip' % rev):
             _error('Could not find Chromium revision %s' % rev)
@@ -121,14 +158,18 @@ def test():
         _exec('unzip %s.zip -d %s' % (rev, rev))
 
     _chdir(build_dir + '/' + rev)
-    cmd = 'vpython content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=%s/out/Default/chrome.exe' % (build_dir + '/' + rev)
-    cmd += ' --webgl-conformance-version=%s' % args.test_version
+    cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=%s/out/Default/chrome.exe' % (build_dir + '/' + rev)
     if args.test_filter != 'all':
         cmd += ' --test-filter=%s' % args.test_filter
 
-    result = _exec(cmd)
-    if result[0]:
-        _error('Failed to test CTS')
+    cmds = []
+    cmds.append(cmd + ' --webgl-conformance-version=1.0.3')
+    cmds.append(cmd + ' --webgl-conformance-version=1.0.3 --extra-browser-args=--use-angle=d3d9')
+    cmds.append(cmd + ' --webgl-conformance-version=2.0.1')
+    for cmd in cmds:
+        result = _exec(cmd)
+        if result[0]:
+            _error('Failed to run test "%s"' % cmd)
 
 
 def _chdir(dir):
@@ -200,9 +241,37 @@ def _msg(msg):
     print m
 
 
+class Parser(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self.is_tr = False
+        self.tag_count = 0
+        self.rev = ''
+        self.rev_result = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'tr':
+            self.is_tr = True
+
+    def handle_endtag(self, tag):
+        if tag == 'tr':
+            self.is_tr = False
+
+    def handle_data(self, data):
+        if self.is_tr:
+            if self.tag_count == 3:
+                self.rev_result.append([self.rev, data])
+                self.tag_count = 0
+            elif self.tag_count > 0:
+                self.tag_count = self.tag_count + 1
+            match = re.search('([a-z0-9]{40})', data)
+            if match:
+                self.rev = match.group(1)
+                self.tag_count = 1
+
+
 if __name__ == '__main__':
     parse_arg()
     setup()
-    sync()
     build()
     test()
