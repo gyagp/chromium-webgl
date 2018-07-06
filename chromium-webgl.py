@@ -94,7 +94,7 @@ def build():
                 break
 
         if count == lkgr_count:
-            rev_hash = parser.rev_result[i + 1 - lkgr_count][0]
+            rev_hash = parser.rev_result[i][0]
             _info('The Last Known Good Revision is %s' % rev_hash)
         else:
             _error('Could not find Last Known Good Revision')
