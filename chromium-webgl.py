@@ -163,8 +163,8 @@ def test():
         cmd += ' --test-filter=%s' % args.test_filter
 
     cmds = []
-    cmds.append(cmd + ' --webgl-conformance-version=1.0.3')
     cmds.append(cmd + ' --webgl-conformance-version=1.0.3 --extra-browser-args=--use-angle=d3d9')
+    cmds.append(cmd + ' --webgl-conformance-version=1.0.3')
     cmds.append(cmd + ' --webgl-conformance-version=2.0.1')
     for cmd in cmds:
         result = _exec(cmd)
