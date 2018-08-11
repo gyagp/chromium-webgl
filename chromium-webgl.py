@@ -110,7 +110,7 @@ def build():
 
     # build Chromium
     _chdir(chromium_src_dir)
-    gn_args = 'proprietary_codecs=true ffmpeg_branding=\\\"Chrome\\\" is_official_build=true is_debug=false'
+    gn_args = 'proprietary_codecs=true ffmpeg_branding=\\\"Chrome\\\" is_debug=false'
     gn_args += ' symbol_level=0 is_component_build=false use_jumbo_build=true remove_webcore_debug_symbols=true enable_nacl=false'
     cmd = 'gn --args=\"%s\" gen out/Default' % gn_args
     result = _exec(cmd)
