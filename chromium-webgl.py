@@ -111,7 +111,7 @@ def build():
     # build Chromium
     _chdir(chromium_src_dir)
     gn_args = 'proprietary_codecs=true ffmpeg_branding=\\\"Chrome\\\" is_debug=false'
-    gn_args += ' symbol_level=0 is_component_build=false use_jumbo_build=true remove_webcore_debug_symbols=true enable_nacl=false'
+    gn_args += ' symbol_level=0 is_component_build=false remove_webcore_debug_symbols=true enable_nacl=false'
     cmd = 'gn --args=\"%s\" gen out/Default' % gn_args
     result = _exec(cmd)
     if result[0]:
@@ -121,7 +121,7 @@ def build():
         _error('Failed to build Chromium')
 
     # get revision
-    cmd = 'git log --shortstat -1 origin/master'
+    cmd = 'git log --shortstat -1'
     result = _exec(cmd, show_cmd=False, return_out=True)
     lines = result[1].split('\n')
     for line in lines:
