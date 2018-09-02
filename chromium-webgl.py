@@ -69,7 +69,7 @@ def build():
     if not args.build:
         return
 
-    # get revision hash
+    # get rev_hash
     if args.build_revision:
         rev_hash = args.build_revision
     else:
@@ -102,11 +102,13 @@ def build():
     # sync code
     _chdir(depot_tools_dir)
     _exec('git pull')
-    _chdir(chromium_src_dir)
-    _exec('git pull')
 
-    cmd = 'gclient sync -R -j%s --revision=%s' % (cpu_count, rev_hash)
-    _exec(cmd)
+    (current_rev_hash, _) = _get_revision()
+    if current_rev_hash != rev_hash:
+        _chdir(chromium_src_dir)
+        _exec('git pull')
+        cmd = 'gclient sync -R -j%s --revision=%s' % (cpu_count, rev_hash)
+        _exec(cmd)
 
     # build Chromium
     _chdir(chromium_src_dir)
@@ -120,20 +122,9 @@ def build():
     if result[0]:
         _error('Failed to build Chromium')
 
-    # get revision
-    cmd = 'git log --shortstat -1'
-    result = _exec(cmd, show_cmd=False, return_out=True)
-    lines = result[1].split('\n')
-    for line in lines:
-        match = re.search('Cr-Commit-Position: refs/heads/master@{#(.*)}', line)
-        if match:
-            rev = int(match.group(1))
-            break
-    else:
-        _error('Failed to find the revision of Chromium')
-
+    (_, rev_number) = _get_revision()
     # generate telemetry_gpu_integration_test
-    cmd = 'python tools/mb/mb.py zip out/Default/ telemetry_gpu_integration_test %s/%s.zip' % (build_dir, rev)
+    cmd = 'python tools/mb/mb.py zip out/Default/ telemetry_gpu_integration_test %s/%s.zip' % (build_dir, rev_number)
     result = _exec(cmd)
     if result[0]:
         _error('Failed to generate telemetry_gpu_integration_test')
@@ -144,21 +135,21 @@ def test():
         return
 
     _chdir(build_dir)
-    rev = args.test_revision
-    if rev == 'latest':
+    rev_number = args.test_revision
+    if rev_number == 'latest':
         files = sorted(os.listdir('.'), reverse=True)
-        rev = files[0].replace('.zip', '')
-        if not re.match('\d{6}', rev):
+        rev_number = files[0].replace('.zip', '')
+        if not re.match('\d{6}', rev_number):
             _error('Could not find the correct revision')
 
-    if not os.path.exists('%s' % rev):
-        if not os.path.exists('%s.zip' % rev):
-            _error('Could not find Chromium revision %s' % rev)
-        _ensure_dir(rev)
-        _exec('unzip %s.zip -d %s' % (rev, rev))
+    if not os.path.exists('%s' % rev_number):
+        if not os.path.exists('%s.zip' % rev_number):
+            _error('Could not find Chromium revision %s' % rev_number)
+        _ensure_dir(rev_number)
+        _exec('unzip %s.zip -d %s' % (rev_number, rev_number))
 
-    _chdir(build_dir + '/' + rev)
-    cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=%s/out/Default/chrome.exe' % (build_dir + '/' + rev)
+    _chdir(build_dir + '/' + rev_number)
+    cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=%s/out/Default/chrome.exe' % (build_dir + '/' + rev_number)
     if args.test_filter != 'all':
         cmd += ' --test-filter=%s' % args.test_filter
 
@@ -175,6 +166,25 @@ def test():
 def _chdir(dir):
     _info('Enter ' + dir)
     os.chdir(dir)
+
+
+def _get_revision():
+    _chdir(chromium_src_dir)
+    cmd = 'git log --shortstat -1'
+    result = _exec(cmd, show_cmd=False, return_out=True)
+    lines = result[1].split('\n')
+    for line in lines:
+        match = re.match('commit (.*)', line)
+        if match:
+            rev_hash = match.group(1)
+        match = re.search('Cr-Commit-Position: refs/heads/master@{#(.*)}', line)
+        if match:
+            rev_number = int(match.group(1))
+            break
+    else:
+        _error('Failed to find the revision of Chromium')
+
+    return (rev_hash, rev_number)
 
 
 def _ensure_dir(dir):
@@ -246,7 +256,7 @@ class Parser(HTMLParser):
         HTMLParser.__init__(self)
         self.is_tr = False
         self.tag_count = 0
-        self.rev = ''
+        self.rev_hash = ''
         self.rev_result = []
 
     def handle_starttag(self, tag, attrs):
@@ -260,13 +270,13 @@ class Parser(HTMLParser):
     def handle_data(self, data):
         if self.is_tr:
             if self.tag_count == 3:
-                self.rev_result.append([self.rev, data])
+                self.rev_result.append([self.rev_hash, data])
                 self.tag_count = 0
             elif self.tag_count > 0:
                 self.tag_count = self.tag_count + 1
             match = re.search('([a-z0-9]{40})', data)
             if match:
-                self.rev = match.group(1)
+                self.rev_hash = match.group(1)
                 self.tag_count = 1
 
 
