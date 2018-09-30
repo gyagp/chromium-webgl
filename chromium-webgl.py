@@ -171,7 +171,7 @@ def test():
         cmd = common_cmd + ' --webgl-conformance-version=%s' % version[VERSION_INDEX_WEBGL]
         if version[VERSION_INDEX_D3D] != '11':
             cmd += ' --extra-browser-args=--use-angle=d3d%s' % version[VERSION_INDEX_D3D]
-        cmd += ' --write-full-results-to %s/%s-%s-%s.log' % (result_dir, datetime, version[VERSION_INDEX_WEBGL], version[VERSION_INDEX_D3D])
+        cmd += ' --write-full-results-to %s/%s-%s-%s-%s.log' % (result_dir, datetime, rev_number, version[VERSION_INDEX_WEBGL], version[VERSION_INDEX_D3D])
         cmds.append(cmd)
 
     for cmd in cmds:
