@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import re
 import subprocess
+import time
 import urllib2
 from HTMLParser import HTMLParser
 
@@ -149,14 +150,30 @@ def test():
         _exec('unzip %s.zip -d %s' % (rev_number, rev_number))
 
     _chdir(build_dir + '/' + rev_number)
-    cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=%s/out/Default/chrome.exe' % (build_dir + '/' + rev_number)
+    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=%s/out/Default/chrome.exe' % (build_dir + '/' + rev_number)
     if args.test_filter != 'all':
-        cmd += ' --test-filter=%s' % args.test_filter
+        common_cmd += ' --test-filter=%s' % args.test_filter
 
+    result_dir = '%s/result' % script_dir
+    _ensure_dir(result_dir)
     cmds = []
-    cmds.append(cmd + ' --webgl-conformance-version=1.0.3 --extra-browser-args=--use-angle=d3d9')
-    cmds.append(cmd + ' --webgl-conformance-version=1.0.3')
-    cmds.append(cmd + ' --webgl-conformance-version=2.0.1')
+    datetime = _get_datetime()
+
+    VERSION_INDEX_WEBGL = 0
+    VERSION_INDEX_D3D = 1
+    versions = [
+        ['1.0.3', '9'],
+        ['1.0.3', '11'],
+        ['2.0.1', '11'],
+    ]
+
+    for version in versions:
+        cmd = common_cmd + ' --webgl-conformance-version=%s' % version[VERSION_INDEX_WEBGL]
+        if version[VERSION_INDEX_D3D] != '11':
+            cmd += ' --extra-browser-args=--use-angle=d3d%s' % version[VERSION_INDEX_D3D]
+        cmd += ' --write-full-results-to %s/%s-%s-%s.log' % (result_dir, datetime, version[VERSION_INDEX_WEBGL], version[VERSION_INDEX_D3D])
+        cmds.append(cmd)
+
     for cmd in cmds:
         result = _exec(cmd)
         if result[0]:
@@ -166,25 +183,6 @@ def test():
 def _chdir(dir):
     _info('Enter ' + dir)
     os.chdir(dir)
-
-
-def _get_revision():
-    _chdir(chromium_src_dir)
-    cmd = 'git log --shortstat -1'
-    result = _exec(cmd, show_cmd=False, return_out=True)
-    lines = result[1].split('\n')
-    for line in lines:
-        match = re.match('commit (.*)', line)
-        if match:
-            rev_hash = match.group(1)
-        match = re.search('Cr-Commit-Position: refs/heads/master@{#(.*)}', line)
-        if match:
-            rev_number = int(match.group(1))
-            break
-    else:
-        _error('Failed to find the revision of Chromium')
-
-    return (rev_hash, rev_number)
 
 
 def _ensure_dir(dir):
@@ -225,6 +223,29 @@ def _exec(cmd, return_out=False, show_cmd=True, show_duration=False):
         _info(str(time_diff) + ' was spent to execute command: ' + cmd)
 
     return result
+
+
+def _get_datetime(format='%Y%m%d%H%M%S'):
+    return time.strftime(format, time.localtime())
+
+
+def _get_revision():
+    _chdir(chromium_src_dir)
+    cmd = 'git log --shortstat -1'
+    result = _exec(cmd, show_cmd=False, return_out=True)
+    lines = result[1].split('\n')
+    for line in lines:
+        match = re.match('commit (.*)', line)
+        if match:
+            rev_hash = match.group(1)
+        match = re.search('Cr-Commit-Position: refs/heads/master@{#(.*)}', line)
+        if match:
+            rev_number = int(match.group(1))
+            break
+    else:
+        _error('Failed to find the revision of Chromium')
+
+    return (rev_hash, rev_number)
 
 
 def _setenv(env, value):
