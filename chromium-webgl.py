@@ -3,12 +3,12 @@ import datetime
 import inspect
 import multiprocessing
 import os
+import platform
 import re
 import subprocess
 import time
 import urllib2
 from HTMLParser import HTMLParser
-
 
 boto_file = '.boto'
 cpu_count = multiprocessing.cpu_count()
@@ -20,7 +20,12 @@ chromium_dir = ''
 chromium_src_dir = ''
 depot_tools_dir = ''
 script_dir = ''
+host_os = platform.system().lower()
 
+skip = {
+    'linux': 'conformance2_textures_misc_tex_3d_size_limit',
+    'windows': '',
+}
 
 def parse_arg():
     global args, args_dict
@@ -35,10 +40,10 @@ examples:
     parser.add_argument('--build', dest='build', help='build', action='store_true')
     parser.add_argument('--build-revision', dest='build_revision', help='Chromium revision to build with')
     parser.add_argument('--test', dest='test', help='test', action='store_true')
-    parser.add_argument('--test-revision', dest='test_revision', help='Chromium revision to test against', default='lkgr')
+    parser.add_argument('--test-chrome-revision', dest='test_chrome_revision', help='Chromium revision', default='latest')
+    parser.add_argument('--test-mesa-revision', dest='test_mesa_revision', help='mesa revision', default='latest')
     parser.add_argument('--test-filter', dest='test_filter', help='WebGL CTS suite to test against', default='all')  # For smoke test, we may use conformance_attribs
     args = parser.parse_args()
-
 
 def setup():
     global build_dir, chromium_dir, chromium_src_dir, depot_tools_dir, script_dir
@@ -64,7 +69,6 @@ def setup():
         f.write(content)
         f.close()
         _setenv('NO_AUTH_BOTO_CONFIG', script_dir + '/' + boto_file)
-
 
 def build():
     if not args.build:
@@ -123,36 +127,65 @@ def build():
     if result[0]:
         _error('Failed to build Chromium')
 
-    (_, rev_number) = _get_revision()
+    (_, chrome_rev_number) = _get_revision()
     # generate telemetry_gpu_integration_test
-    cmd = 'python tools/mb/mb.py zip out/Default/ telemetry_gpu_integration_test %s/%s.zip' % (build_dir, rev_number)
+    cmd = 'python tools/mb/mb.py zip out/Default/ telemetry_gpu_integration_test %s/%s.zip' % (build_dir, chrome_rev_number)
     result = _exec(cmd)
     if result[0]:
         _error('Failed to generate telemetry_gpu_integration_test')
-
 
 def test():
     if not args.test:
         return
 
     _chdir(build_dir)
-    rev_number = args.test_revision
-    if rev_number == 'latest':
+    if host_os == 'linux':
+        mesa_install_dir = '/workspace/install'
+        mesa_rev_number = args.test_mesa_revision
+        files = sorted(os.listdir(mesa_install_dir), reverse=True)
+        if mesa_rev_number == 'system':
+            _info('Use system Mesa for testing')
+        else:
+            if mesa_rev_number == 'latest':
+                mesa_dir = files[0]
+                mesa_rev_number = re.match('mesa-master-release-(.*)-', mesa_dir).group(1)
+            else:
+                for file in files:
+                    match = re.match('mesa-master-release-%s' % mesa_rev_number, file)
+                    if match:
+                        mesa_dir = file
+                        break
+                else:
+                    _error('Could not find mesa build %s' % mesa_rev_number)
+
+            mesa_dir = mesa_install_dir + '/' + mesa_dir
+            _setenv('LD_LIBRARY_PATH', mesa_dir + '/lib')
+            _setenv('LIBGL_DRIVERS_PATH', mesa_dir + '/lib/dri')
+            _info('Use mesa at %s for testing' % mesa_dir)
+
+    chrome_rev_number = args.test_chrome_revision
+    if chrome_rev_number == 'latest':
         files = sorted(os.listdir('.'), reverse=True)
-        rev_number = files[0].replace('.zip', '')
-        if not re.match('\d{6}', rev_number):
+        chrome_rev_number = files[0].replace('.zip', '')
+        if not re.match('\d{6}', chrome_rev_number):
             _error('Could not find the correct revision')
 
-    if not os.path.exists('%s' % rev_number):
-        if not os.path.exists('%s.zip' % rev_number):
-            _error('Could not find Chromium revision %s' % rev_number)
-        _ensure_dir(rev_number)
-        _exec('unzip %s.zip -d %s' % (rev_number, rev_number))
+    if not os.path.exists('%s' % chrome_rev_number):
+        if not os.path.exists('%s.zip' % chrome_rev_number):
+            _error('Could not find Chromium revision %s' % chrome_rev_number)
+        _ensure_dir(chrome_rev_number)
+        _exec('unzip %s.zip -d %s' % (chrome_rev_number, chrome_rev_number))
 
-    _chdir(build_dir + '/' + rev_number)
-    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=%s/out/Default/chrome.exe' % (build_dir + '/' + rev_number)
+    _chdir(build_dir + '/' + chrome_rev_number)
+    chrome_binary_suffix = ''
+    if host_os == 'windows':
+        chrome_binary_suffix += '.exe'
+    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=%s/out/Default/chrome%s' % (build_dir + '/' + chrome_rev_number, chrome_binary_suffix)
     if args.test_filter != 'all':
         common_cmd += ' --test-filter=%s' % args.test_filter
+    skip_filter = skip[host_os]
+    if skip_filter:
+        common_cmd += ' --skip=%s' % skip_filter
 
     result_dir = '%s/result' % script_dir
     _ensure_dir(result_dir)
@@ -161,17 +194,23 @@ def test():
 
     VERSION_INDEX_WEBGL = 0
     VERSION_INDEX_D3D = 1
-    versions = [
-        ['1.0.3', '9'],
-        ['1.0.3', '11'],
-        ['2.0.1', '11'],
-    ]
+    if host_os == 'linux':
+        versions = [['2.0.1']]
+    elif host_os == 'windows':
+        versions = [
+            ['1.0.3', '9'],
+            ['1.0.3', '11'],
+            ['2.0.1', '11'],
+        ]
 
     for version in versions:
         cmd = common_cmd + ' --webgl-conformance-version=%s' % version[VERSION_INDEX_WEBGL]
-        if version[VERSION_INDEX_D3D] != '11':
-            cmd += ' --extra-browser-args=--use-angle=d3d%s' % version[VERSION_INDEX_D3D]
-        cmd += ' --write-full-results-to %s/%s-%s-%s-%s.log' % (result_dir, datetime, rev_number, version[VERSION_INDEX_WEBGL], version[VERSION_INDEX_D3D])
+        if host_os == 'linux':
+            cmd += ' --write-full-results-to %s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, mesa_rev_number, version[VERSION_INDEX_WEBGL])
+        elif host_os == 'windows':
+            cmd += ' --write-full-results-to %s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, version[VERSION_INDEX_WEBGL], version[VERSION_INDEX_D3D])
+            if version[VERSION_INDEX_D3D] != '11':
+                cmd += ' --extra-browser-args=--use-angle=d3d%s' % version[VERSION_INDEX_D3D]
         cmds.append(cmd)
 
     for cmd in cmds:
@@ -179,11 +218,9 @@ def test():
         if result[0]:
             _error('Failed to run test "%s"' % cmd)
 
-
 def _chdir(dir):
     _info('Enter ' + dir)
     os.chdir(dir)
-
 
 def _ensure_dir(dir):
     if os.path.exists(dir):
@@ -191,13 +228,11 @@ def _ensure_dir(dir):
 
     os.mkdir(dir)
 
-
 def _ensure_nofile(file):
     if not os.path.exists(file):
         return
 
     os.remove(file)
-
 
 def _exec(cmd, return_out=False, show_cmd=True, show_duration=False):
     if show_cmd:
@@ -224,10 +259,8 @@ def _exec(cmd, return_out=False, show_cmd=True, show_duration=False):
 
     return result
 
-
 def _get_datetime(format='%Y%m%d%H%M%S'):
     return time.strftime(format, time.localtime())
-
 
 def _get_revision():
     _chdir(chromium_src_dir)
@@ -240,37 +273,31 @@ def _get_revision():
             rev_hash = match.group(1)
         match = re.search('Cr-Commit-Position: refs/heads/master@{#(.*)}', line)
         if match:
-            rev_number = int(match.group(1))
+            chrome_rev_number = int(match.group(1))
             break
     else:
         _error('Failed to find the revision of Chromium')
 
-    return (rev_hash, rev_number)
-
+    return (rev_hash, chrome_rev_number)
 
 def _setenv(env, value):
     if value:
         os.environ[env] = value
 
-
 def _cmd(cmd):
     _msg(cmd)
-
 
 def _error(error):
     _msg(error)
     exit(1)
 
-
 def _info(info):
     _msg(info)
-
 
 def _msg(msg):
     m = inspect.stack()[1][3].upper().lstrip('_')
     m = '[' + m + '] ' + msg
     print m
-
 
 class Parser(HTMLParser):
     def __init__(self):
