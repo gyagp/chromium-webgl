@@ -1,14 +1,19 @@
 import argparse
 import datetime
 import inspect
+import json
 import multiprocessing
 import os
 import platform
 import re
 import subprocess
+import smtplib
 import time
 import urllib2
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from HTMLParser import HTMLParser
+
 
 boto_file = '.boto'
 cpu_count = multiprocessing.cpu_count()
@@ -16,7 +21,6 @@ lkgr_count = 100
 lkgr_url = 'https://ci.chromium.org/p/chromium/builders/luci.chromium.ci/Win10%20FYI%20Release%20%28Intel%20HD%20630%29?limit=500'
 
 build_dir = ''
-chromium_dir = ''
 chromium_src_dir = ''
 depot_tools_dir = ''
 script_dir = ''
@@ -44,18 +48,29 @@ examples:
     parser.add_argument('--test-mesa-rev', dest='test_mesa_rev', help='mesa revision', default='latest')
     parser.add_argument('--test-filter', dest='test_filter', help='WebGL CTS suite to test against', default='all')  # For smoke test, we may use conformance_attribs
     parser.add_argument('--test-verbose', dest='test_verbose', help='verbose mode of test', action='store_true')
+    parser.add_argument('--daily', dest='daily', help='daily test', action='store_true')
+    parser.add_argument('--dryrun', dest='dryrun', help='dryrun', action='store_true')
     args = parser.parse_args()
 
 def setup():
-    global build_dir, chromium_dir, chromium_src_dir, depot_tools_dir, script_dir
+    global build_dir, chromium_src_dir, depot_tools_dir, script_dir
 
     root_dir = os.path.dirname(os.path.split(os.path.realpath(__file__))[0]).replace('\\', '/')
     build_dir = root_dir + '/build'
-    chromium_dir = root_dir + '/chromium'
-    chromium_src_dir = chromium_dir + '/src'
+    chromium_src_dir = root_dir + '/chromium/src'
     depot_tools_dir = root_dir + '/depot_tools'
     script_dir = root_dir + '/script'
 
+def build():
+    if not args.build and not args.daily:
+        return
+
+    # build mesa
+    if args.daily and host_os == 'linux':
+        _chdir('/workspace/project/readonly/mesa')
+        _exec('python mesa.py --sync --build')
+
+    # build Chrome
     _setenv('DEPOT_TOOLS_WIN_TOOLCHAIN', 0)
 
     if args.proxy:
@@ -70,10 +85,6 @@ def setup():
         f.write(content)
         f.close()
         _setenv('NO_AUTH_BOTO_CONFIG', script_dir + '/' + boto_file)
-
-def build():
-    if not args.build:
-        return
 
     # get rev_hash
     if args.build_chrome_hash:
@@ -119,7 +130,6 @@ def build():
             cmd += ' --revision=%s' % rev_hash
         _exec(cmd)
 
-    # build Chromium
     _chdir(chromium_src_dir)
     gn_args = 'proprietary_codecs=true ffmpeg_branding=\\\"Chrome\\\" is_debug=false'
     gn_args += ' symbol_level=0 is_component_build=false remove_webcore_debug_symbols=true enable_nacl=false'
@@ -139,7 +149,7 @@ def build():
         _error('Failed to generate telemetry_gpu_integration_test')
 
 def test():
-    if not args.test:
+    if not args.test and not args.daily:
         return
 
     _chdir(build_dir)
@@ -196,34 +206,42 @@ def test():
 
     result_dir = '%s/result' % script_dir
     _ensure_dir(result_dir)
-    cmds = []
     datetime = _get_datetime()
 
-    VERSION_INDEX_WEBGL = 0
-    VERSION_INDEX_D3D = 1
+    COMB_INDEX_WEBGL = 0
+    COMB_INDEX_D3D = 1
     if host_os == 'linux':
-        versions = [['2.0.1']]
+        combs = [['2.0.1']]
     elif host_os == 'windows':
-        versions = [
+        combs = [
             ['1.0.3', '9'],
             ['1.0.3', '11'],
             ['2.0.1', '11'],
         ]
 
-    for version in versions:
-        cmd = common_cmd + ' --webgl-conformance-version=%s' % version[VERSION_INDEX_WEBGL]
+    for comb in combs:
+        cmd = common_cmd + ' --webgl-conformance-version=%s' % comb[COMB_INDEX_WEBGL]
+        log_file = ''
         if host_os == 'linux':
-            cmd += ' --write-full-results-to %s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, mesa_rev_number, version[VERSION_INDEX_WEBGL])
+            log_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, mesa_rev_number, comb[COMB_INDEX_WEBGL])
         elif host_os == 'windows':
-            cmd += ' --write-full-results-to %s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, version[VERSION_INDEX_WEBGL], version[VERSION_INDEX_D3D])
-            if version[VERSION_INDEX_D3D] != '11':
-                cmd += ' --extra-browser-args=--use-angle=d3d%s' % version[VERSION_INDEX_D3D]
-        cmds.append(cmd)
+            if comb[COMB_INDEX_D3D] != '11':
+                cmd += ' --extra-browser-args=--use-angle=d3d%s' % comb[COMB_INDEX_D3D]
+            log_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL], comb[COMB_INDEX_D3D])
 
-    for cmd in cmds:
+        cmd += ' --write-full-results-to %s' % log_file
         result = _exec(cmd)
         if result[0]:
             _error('Failed to run test "%s"' % cmd)
+
+        # send report
+        if args.daily:
+            result = json.load(open(log_file))
+            subject = 'WebGL CTS on Chrome %s and Mesa %s has %s Regression' % (chrome_rev_number, mesa_rev_number, result['num_regressions'])
+            result_type = result['num_failures_by_type']
+            content = 'FAIL: %s, SKIP: %s, PASS %s' % (result_type['FAIL'], result_type['SKIP'], result_type['PASS'])
+            _send_email('webperf@intel.com', 'yang.gu@intel.com', subject, content)
+
 
 def _chdir(dir):
     _info('Enter ' + dir)
@@ -241,23 +259,26 @@ def _ensure_nofile(file):
 
     os.remove(file)
 
-def _exec(cmd, return_out=False, show_cmd=True, show_duration=False):
+def _exec(cmd, return_out=False, show_cmd=True, show_duration=False, dryrun=False):
     if show_cmd:
         _cmd(cmd)
 
     if show_duration:
         start_time = datetime.datetime.now().replace(microsecond=0)
 
-    if return_out:
-        tmp_out = ''
-        process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        (out, err) = process.communicate()
-        out = tmp_out + out
-        ret = process.returncode
-        result = [ret, out + err]
+    if (args.dryrun or dryrun) and not re.match('git log', cmd):
+        result = [0, '']
     else:
-        ret = os.system(cmd)
-        result = [ret / 256, '']
+        if return_out:
+            tmp_out = ''
+            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            (out, err) = process.communicate()
+            out = tmp_out + out
+            ret = process.returncode
+            result = [ret, out + err]
+        else:
+            ret = os.system(cmd)
+            result = [ret / 256, '']
 
     if show_duration:
         end_time = datetime.datetime.now().replace(microsecond=0)
@@ -333,6 +354,26 @@ class Parser(HTMLParser):
             if match:
                 self.rev_hash = match.group(1)
                 self.tag_count = 1
+
+def _send_email(sender, to, subject, content, type='plain'):
+    if isinstance(to, list):
+        to = ','.join(to)
+
+    to_list = to.split(',')
+    msg = MIMEMultipart('alternative')
+    msg['From'] = sender
+    msg['To'] = to
+    msg['Subject'] = subject
+    msg.attach(MIMEText(content, type))
+
+    try:
+        smtp = smtplib.SMTP('localhost')
+        smtp.sendmail(sender, to_list, msg.as_string())
+        _info('Email was sent successfully')
+    except Exception as e:
+        _error('Failed to send mail: %s' % e)
+    finally:
+        smtp.quit()
 
 
 if __name__ == '__main__':
