@@ -33,15 +33,15 @@ def parse_arg():
                                      formatter_class=argparse.RawTextHelpFormatter,
                                      epilog='''
 examples:
-  python %(prog)s --proxy <host>:<port> --build --build-revision <revision>
-  python %(prog)s --test --test-revision <revision>
+  python %(prog)s --proxy <host>:<port> --build --build-chrome-hash <hash>
+  python %(prog)s --test
 ''')
     parser.add_argument('--proxy', dest='proxy', help='proxy')
     parser.add_argument('--build', dest='build', help='build', action='store_true')
-    parser.add_argument('--build-revision', dest='build_revision', help='Chromium revision to build with')
+    parser.add_argument('--build-chrome-hash', dest='build_chrome_hash', help='Chrome hash to build', default='latest')
     parser.add_argument('--test', dest='test', help='test', action='store_true')
-    parser.add_argument('--test-chrome-revision', dest='test_chrome_revision', help='Chromium revision', default='latest')
-    parser.add_argument('--test-mesa-revision', dest='test_mesa_revision', help='mesa revision', default='latest')
+    parser.add_argument('--test-chrome-rev', dest='test_chrome_rev', help='Chromium revision', default='latest')
+    parser.add_argument('--test-mesa-rev', dest='test_mesa_rev', help='mesa revision', default='latest')
     parser.add_argument('--test-filter', dest='test_filter', help='WebGL CTS suite to test against', default='all')  # For smoke test, we may use conformance_attribs
     args = parser.parse_args()
 
@@ -75,8 +75,8 @@ def build():
         return
 
     # get rev_hash
-    if args.build_revision:
-        rev_hash = args.build_revision
+    if args.build_chrome_hash:
+        rev_hash = args.build_chrome_hash
     else:
         try:
             response = urllib2.urlopen(lkgr_url)
@@ -100,19 +100,22 @@ def build():
 
         if count == lkgr_count:
             rev_hash = parser.rev_result[i][0]
-            _info('The Last Known Good Revision is %s' % rev_hash)
+            _info('The Last Known Good Hash is %s' % rev_hash)
         else:
-            _error('Could not find Last Known Good Revision')
+            _error('Could not find Last Known Good Hash')
 
     # sync code
     _chdir(depot_tools_dir)
     _exec('git pull')
 
-    (current_rev_hash, _) = _get_revision()
-    if current_rev_hash != rev_hash:
+    (current_rev_hash, _) = _get_rev()
+
+    if rev_hash == 'latest' or current_rev_hash != rev_hash:
         _chdir(chromium_src_dir)
         _exec('git pull')
-        cmd = 'gclient sync -R -j%s --revision=%s' % (cpu_count, rev_hash)
+        cmd = 'gclient sync -R -j%s' % cpu_count
+        if rev_hash != 'latest':
+            cmd += ' --revision=%s' % rev_hash
         _exec(cmd)
 
     # build Chromium
@@ -127,7 +130,7 @@ def build():
     if result[0]:
         _error('Failed to build Chromium')
 
-    (_, chrome_rev_number) = _get_revision()
+    (_, chrome_rev_number) = _get_rev()
     # generate telemetry_gpu_integration_test
     cmd = 'python tools/mb/mb.py zip out/Default/ telemetry_gpu_integration_test %s/%s.zip' % (build_dir, chrome_rev_number)
     result = _exec(cmd)
@@ -141,7 +144,7 @@ def test():
     _chdir(build_dir)
     if host_os == 'linux':
         mesa_install_dir = '/workspace/install'
-        mesa_rev_number = args.test_mesa_revision
+        mesa_rev_number = args.test_mesa_rev
         files = sorted(os.listdir(mesa_install_dir), reverse=True)
         if mesa_rev_number == 'system':
             _info('Use system Mesa for testing')
@@ -163,7 +166,7 @@ def test():
             _setenv('LIBGL_DRIVERS_PATH', mesa_dir + '/lib/dri')
             _info('Use mesa at %s for testing' % mesa_dir)
 
-    chrome_rev_number = args.test_chrome_revision
+    chrome_rev_number = args.test_chrome_rev
     if chrome_rev_number == 'latest':
         files = sorted(os.listdir('.'), reverse=True)
         chrome_rev_number = files[0].replace('.zip', '')
@@ -262,7 +265,7 @@ def _exec(cmd, return_out=False, show_cmd=True, show_duration=False):
 def _get_datetime(format='%Y%m%d%H%M%S'):
     return time.strftime(format, time.localtime())
 
-def _get_revision():
+def _get_rev():
     _chdir(chromium_src_dir)
     cmd = 'git log --shortstat -1'
     result = _exec(cmd, show_cmd=False, return_out=True)
