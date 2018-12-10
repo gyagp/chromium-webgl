@@ -23,7 +23,7 @@ script_dir = ''
 host_os = platform.system().lower()
 
 skip = {
-    'linux': 'conformance2_textures_misc_tex_3d_size_limit',
+    'linux': ['conformance2_textures_misc_tex_3d_size_limit'],
     'windows': '',
 }
 
@@ -43,6 +43,7 @@ examples:
     parser.add_argument('--test-chrome-rev', dest='test_chrome_rev', help='Chromium revision', default='latest')
     parser.add_argument('--test-mesa-rev', dest='test_mesa_rev', help='mesa revision', default='latest')
     parser.add_argument('--test-filter', dest='test_filter', help='WebGL CTS suite to test against', default='all')  # For smoke test, we may use conformance_attribs
+    parser.add_argument('--test-verbose', dest='test_verbose', help='verbose mode of test', action='store_true')
     args = parser.parse_args()
 
 def setup():
@@ -183,12 +184,15 @@ def test():
     chrome_binary_suffix = ''
     if host_os == 'windows':
         chrome_binary_suffix += '.exe'
-    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=%s/out/Default/chrome%s' % (build_dir + '/' + chrome_rev_number, chrome_binary_suffix)
+    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=out/Default/chrome%s' % chrome_binary_suffix
     if args.test_filter != 'all':
         common_cmd += ' --test-filter=%s' % args.test_filter
     skip_filter = skip[host_os]
     if skip_filter:
-        common_cmd += ' --skip=%s' % skip_filter
+        for skip_tmp in skip_filter:
+            common_cmd += ' --skip=gpu_tests.webgl_conformance_integration_test.WebGLConformanceIntegrationTest.WebglConformance_%s' % skip_tmp
+    if args.test_verbose:
+        common_cmd += ' --verbose'
 
     result_dir = '%s/result' % script_dir
     _ensure_dir(result_dir)
