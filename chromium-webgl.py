@@ -170,10 +170,20 @@ def test():
 
         # send report
         if args.daily:
-            result = json.load(open(log_file))
-            subject = 'WebGL CTS on Chrome %s and Mesa %s has %s Regression' % (chrome_rev_number, mesa_rev_number, result['num_regressions'])
-            result_type = result['num_failures_by_type']
-            content = 'FAIL: %s, SKIP: %s, PASS %s' % (result_type['FAIL'], result_type['SKIP'], result_type['PASS'])
+            json_result = json.load(open(log_file))
+            result_type = json_result['num_failures_by_type']
+            content = 'FAIL: %s, SKIP: %s, PASS %s\n' % (result_type['FAIL'], result_type['SKIP'], result_type['PASS'])
+            test_results = json_result['tests']['gpu_tests']['webgl_conformance_integration_test']['WebGLConformanceIntegrationTest']
+            fails = []
+            for key in test_results:
+                if test_results[key]['actual'] == 'FAIL':
+                    fails.append(key)
+            if fails:
+                content += '[FAIL]\n'
+                for fail in fails:
+                    content += fail + '\n'
+
+            subject = 'WebGL CTS on Chrome %s and Mesa %s has %s Regression' % (chrome_rev_number, mesa_rev_number, json_result['num_regressions'])
             _send_email('webperf@intel.com', 'yang.gu@intel.com', subject, content)
 
 def run():
