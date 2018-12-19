@@ -50,6 +50,7 @@ examples:
     parser.add_argument('--test-verbose', dest='test_verbose', help='verbose mode of test', action='store_true')
     parser.add_argument('--daily', dest='daily', help='daily test', action='store_true')
     parser.add_argument('--dryrun', dest='dryrun', help='dryrun', action='store_true')
+    parser.add_argument('--run', dest='run', help='run', action='store_true')
     args = parser.parse_args()
 
 def setup():
@@ -60,6 +61,8 @@ def setup():
     chromium_src_dir = root_dir + '/chromium/src'
     depot_tools_dir = root_dir + '/depot_tools'
     script_dir = root_dir + '/script'
+    if args.daily:
+        args.proxy = 'child-prc.intel.com:913'
 
 def build():
     if not args.build and not args.daily:
@@ -70,86 +73,10 @@ def build():
         _chdir('/workspace/project/readonly/mesa')
         _exec('python mesa.py --sync --build')
 
-    # build Chrome
-    _setenv('DEPOT_TOOLS_WIN_TOOLCHAIN', 0)
-
-    if args.proxy:
-        _setenv('http_proxy', args.proxy)
-        _setenv('https_proxy', args.proxy)
-
-        _chdir(script_dir)
-        _ensure_nofile(boto_file)
-        proxy_parts = args.proxy.split(':')
-        f = open(boto_file, 'w')
-        content = '[Boto]\nproxy=%s\nproxy_port=%s\nproxy_rdns=True' % (proxy_parts[0], proxy_parts[1])
-        f.write(content)
-        f.close()
-        _setenv('NO_AUTH_BOTO_CONFIG', script_dir + '/' + boto_file)
-
-    # get rev_hash
-    if args.build_chrome_hash:
-        rev_hash = args.build_chrome_hash
-    else:
-        try:
-            response = urllib2.urlopen(lkgr_url)
-            html = response.read()
-        except Exception:
-            _error('Failed to open %s' % lkgr_url)
-
-        parser = Parser()
-        parser.feed(html)
-
-        count = 0
-        for i in range(0, len(parser.rev_result)):
-            rev_hash = parser.rev_result[i][0]
-            result = parser.rev_result[i][1]
-            if result == 'Success':
-                count = count + 1
-            else:
-                count = 0
-            if count == lkgr_count:
-                break
-
-        if count == lkgr_count:
-            rev_hash = parser.rev_result[i][0]
-            _info('The Last Known Good Hash is %s' % rev_hash)
-        else:
-            _error('Could not find Last Known Good Hash')
-
-    # sync code
-    _chdir(depot_tools_dir)
-    _exec('git pull')
-
-    (current_rev_hash, _) = _get_rev()
-
-    if rev_hash == 'latest' or current_rev_hash != rev_hash:
-        _chdir(chromium_src_dir)
-        _exec('git pull')
-        cmd = 'gclient sync -R -j%s' % cpu_count
-        if rev_hash != 'latest':
-            cmd += ' --revision=%s' % rev_hash
-        _exec(cmd)
-
-    _chdir(chromium_src_dir)
-    gn_args = 'proprietary_codecs=true ffmpeg_branding=\\\"Chrome\\\" is_debug=false'
-    gn_args += ' symbol_level=0 is_component_build=false remove_webcore_debug_symbols=true enable_nacl=false'
-    cmd = 'gn --args=\"%s\" gen out/Default' % gn_args
-    result = _exec(cmd)
-    if result[0]:
-        _error('Failed to execute gn command')
-    result = _exec('ninja -j%s -C out/Default chrome' % cpu_count)
-    if result[0]:
-        _error('Failed to build Chromium')
-
-    (_, chrome_rev_number) = _get_rev()
-    # generate telemetry_gpu_integration_test
-    cmd = 'python tools/mb/mb.py zip out/Default/ telemetry_gpu_integration_test %s/%s.zip' % (build_dir, chrome_rev_number)
-    result = _exec(cmd)
-    if result[0]:
-        _error('Failed to generate telemetry_gpu_integration_test')
+    _build_chrome()
 
 def test():
-    if not args.test and not args.daily:
+    if not args.test and not args.daily and not args.run:
         return
 
     _chdir(build_dir)
@@ -158,7 +85,7 @@ def test():
         mesa_rev_number = args.test_mesa_rev
         files = sorted(os.listdir(mesa_install_dir), reverse=True)
         if mesa_rev_number == 'system':
-            _info('Use system Mesa for testing')
+            _info('Use system Mesa')
         else:
             if mesa_rev_number == 'latest':
                 mesa_dir = files[0]
@@ -175,7 +102,7 @@ def test():
             mesa_dir = mesa_install_dir + '/' + mesa_dir
             _setenv('LD_LIBRARY_PATH', mesa_dir + '/lib')
             _setenv('LIBGL_DRIVERS_PATH', mesa_dir + '/lib/dri')
-            _info('Use mesa at %s for testing' % mesa_dir)
+            _info('Use mesa at %s' % mesa_dir)
 
     chrome_rev_number = args.test_chrome_rev
     if chrome_rev_number == 'latest':
@@ -194,6 +121,13 @@ def test():
     chrome_binary_suffix = ''
     if host_os == 'windows':
         chrome_binary_suffix += '.exe'
+
+    if args.run:
+        param = '--enable-experimental-web-platform-features --disable-gpu-process-for-dx12-vulkan-info-collection --disable-domain-blocking-for-3d-apis --disable-gpu-process-crash-limit --disable-blink-features=WebXR --js-flags=--expose-gc --disable-gpu-watchdog --autoplay-policy=no-user-gesture-required --disable-features=UseSurfaceLayerForVideo --enable-net-benchmarking --metrics-recording-only --no-default-browser-check --no-first-run --ignore-background-tasks --enable-gpu-benchmarking --deny-permission-prompts --autoplay-policy=no-user-gesture-required --disable-background-networking --disable-component-extensions-with-background-pages --disable-default-apps --disable-search-geolocation-disclosure --enable-crash-reporter-for-testing --disable-component-update'
+        #param = '--enable-experimental-web-platform-features'
+        _exec('out/Default/chrome%s %s http://wp-27.sh.intel.com/workspace/project/readonly/WebGL/sdk/tests/webgl-conformance-tests.html?version=2.0.1' % (chrome_binary_suffix, param))
+        return
+
     common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=out/Default/chrome%s' % chrome_binary_suffix
     if args.test_filter != 'all':
         common_cmd += ' --test-filter=%s' % args.test_filter
@@ -232,7 +166,7 @@ def test():
         cmd += ' --write-full-results-to %s' % log_file
         result = _exec(cmd)
         if result[0]:
-            _error('Failed to run test "%s"' % cmd)
+            _warning('Failed to run test "%s"' % cmd)
 
         # send report
         if args.daily:
@@ -242,6 +176,66 @@ def test():
             content = 'FAIL: %s, SKIP: %s, PASS %s' % (result_type['FAIL'], result_type['SKIP'], result_type['PASS'])
             _send_email('webperf@intel.com', 'yang.gu@intel.com', subject, content)
 
+def run():
+    if not args.run:
+        return
+
+def _sync_chrome(chrome_rev_hash):
+    if chrome_rev_hash != 'latest':
+        (chrome_rev_hash_tmp, _) = _get_rev()
+        if chrome_rev_hash == chrome_rev_hash_tmp:
+            return
+
+    _chdir(chromium_src_dir)
+    _exec('git pull')
+    cmd = 'gclient sync -R -j%s' % cpu_count
+    if chrome_rev_hash != 'latest':
+        cmd += ' --revision=%s' % chrome_rev_hash
+    _exec(cmd)
+
+def _build_chrome():
+    _sync_chrome(args.build_chrome_hash)
+    (chrome_rev_hash, chrome_rev_number) = _get_rev()
+    if os.path.exists('%s/%s.zip' % (build_dir, chrome_rev_number)):
+        _info('Chrome has been built')
+        return
+
+    _setenv('DEPOT_TOOLS_WIN_TOOLCHAIN', 0)
+
+    if args.proxy:
+        _setenv('http_proxy', args.proxy)
+        _setenv('https_proxy', args.proxy)
+
+        _chdir(script_dir)
+        _ensure_nofile(boto_file)
+        proxy_parts = args.proxy.split(':')
+        f = open(boto_file, 'w')
+        content = '[Boto]\nproxy=%s\nproxy_port=%s\nproxy_rdns=True' % (proxy_parts[0], proxy_parts[1])
+        f.write(content)
+        f.close()
+        _setenv('NO_AUTH_BOTO_CONFIG', script_dir + '/' + boto_file)
+
+    _chdir(depot_tools_dir)
+    _exec('git pull')
+
+    _chdir(chromium_src_dir + '/build/util')
+    _exec('python lastchange.py -o LASTCHANGE')
+    _chdir(chromium_src_dir)
+    gn_args = 'proprietary_codecs=true ffmpeg_branding=\\\"Chrome\\\" is_debug=false'
+    gn_args += ' symbol_level=0 is_component_build=false remove_webcore_debug_symbols=true enable_nacl=false'
+    cmd = 'gn --args=\"%s\" gen out/Default' % gn_args
+    result = _exec(cmd)
+    if result[0]:
+        _error('Failed to execute gn command')
+    result = _exec('ninja -j%s -C out/Default chrome' % cpu_count)
+    if result[0]:
+        _error('Failed to build Chromium')
+
+    # generate telemetry_gpu_integration_test
+    cmd = 'python tools/mb/mb.py zip out/Default/ telemetry_gpu_integration_test %s/%s.zip' % (build_dir, chrome_rev_number)
+    result = _exec(cmd)
+    if result[0]:
+        _error('Failed to generate telemetry_gpu_integration_test')
 
 def _chdir(dir):
     _info('Enter ' + dir)
@@ -298,7 +292,7 @@ def _get_rev():
     for line in lines:
         match = re.match('commit (.*)', line)
         if match:
-            rev_hash = match.group(1)
+            chrome_rev_hash = match.group(1)
         match = re.search('Cr-Commit-Position: refs/heads/master@{#(.*)}', line)
         if match:
             chrome_rev_number = int(match.group(1))
@@ -306,7 +300,7 @@ def _get_rev():
     else:
         _error('Failed to find the revision of Chromium')
 
-    return (rev_hash, chrome_rev_number)
+    return (chrome_rev_hash, chrome_rev_number)
 
 def _setenv(env, value):
     if value:
@@ -322,38 +316,13 @@ def _error(error):
 def _info(info):
     _msg(info)
 
+def _warning(warning):
+    _msg(warning)
+
 def _msg(msg):
     m = inspect.stack()[1][3].upper().lstrip('_')
     m = '[' + m + '] ' + msg
     print m
-
-class Parser(HTMLParser):
-    def __init__(self):
-        HTMLParser.__init__(self)
-        self.is_tr = False
-        self.tag_count = 0
-        self.rev_hash = ''
-        self.rev_result = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag == 'tr':
-            self.is_tr = True
-
-    def handle_endtag(self, tag):
-        if tag == 'tr':
-            self.is_tr = False
-
-    def handle_data(self, data):
-        if self.is_tr:
-            if self.tag_count == 3:
-                self.rev_result.append([self.rev_hash, data])
-                self.tag_count = 0
-            elif self.tag_count > 0:
-                self.tag_count = self.tag_count + 1
-            match = re.search('([a-z0-9]{40})', data)
-            if match:
-                self.rev_hash = match.group(1)
-                self.tag_count = 1
 
 def _send_email(sender, to, subject, content, type='plain'):
     if isinstance(to, list):
@@ -375,9 +344,38 @@ def _send_email(sender, to, subject, content, type='plain'):
     finally:
         smtp.quit()
 
+class Parser(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self.is_tr = False
+        self.tag_count = 0
+        self.chrome_rev_hash = ''
+        self.rev_result = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'tr':
+            self.is_tr = True
+
+    def handle_endtag(self, tag):
+        if tag == 'tr':
+            self.is_tr = False
+
+    def handle_data(self, data):
+        if self.is_tr:
+            if self.tag_count == 3:
+                self.rev_result.append([self.chrome_rev_hash, data])
+                self.tag_count = 0
+            elif self.tag_count > 0:
+                self.tag_count = self.tag_count + 1
+            match = re.search('([a-z0-9]{40})', data)
+            if match:
+                self.chrome_rev_hash = match.group(1)
+                self.tag_count = 1
+
 
 if __name__ == '__main__':
     parse_arg()
     setup()
     build()
     test()
+    run()
