@@ -9,7 +9,6 @@ import re
 import subprocess
 import smtplib
 import time
-import urllib2
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from HTMLParser import HTMLParser
@@ -17,8 +16,6 @@ from HTMLParser import HTMLParser
 
 boto_file = '.boto'
 cpu_count = multiprocessing.cpu_count()
-lkgr_count = 100
-lkgr_url = 'https://ci.chromium.org/p/chromium/builders/luci.chromium.ci/Win10%20FYI%20Release%20%28Intel%20HD%20630%29?limit=500'
 
 build_dir = ''
 chromium_src_dir = ''
@@ -28,11 +25,12 @@ host_os = platform.system().lower()
 
 skip = {
     'linux': ['conformance2_textures_misc_tex_3d_size_limit'],
-    'windows': '',
+    'windows': [],
+    'darwin': [],
 }
 
 def parse_arg():
-    global args, args_dict
+    global args
     parser = argparse.ArgumentParser(description='Chromium WebGL',
                                      formatter_class=argparse.RawTextHelpFormatter,
                                      epilog='''
@@ -60,9 +58,11 @@ def setup():
     build_dir = root_dir + '/build'
     chromium_src_dir = root_dir + '/chromium/src'
     depot_tools_dir = root_dir + '/depot_tools'
+    _setenv('PATH', depot_tools_dir)
     script_dir = root_dir + '/script'
     if args.daily:
         args.proxy = 'child-prc.intel.com:913'
+
 
 def build():
     if not args.build and not args.daily:
@@ -108,7 +108,7 @@ def test():
     if chrome_rev_number == 'latest':
         files = sorted(os.listdir('.'), reverse=True)
         chrome_rev_number = files[0].replace('.zip', '')
-        if not re.match('\d{6}', chrome_rev_number):
+        if not re.match(r'\d{6}', chrome_rev_number):
             _error('Could not find the correct revision')
 
     if not os.path.exists('%s' % chrome_rev_number):
@@ -144,7 +144,7 @@ def test():
 
     COMB_INDEX_WEBGL = 0
     COMB_INDEX_D3D = 1
-    if host_os == 'linux':
+    if host_os in ['linux', 'darwin']:
         combs = [['2.0.1']]
     elif host_os == 'windows':
         combs = [
@@ -162,6 +162,8 @@ def test():
             if comb[COMB_INDEX_D3D] != '11':
                 cmd += ' --extra-browser-args=--use-angle=d3d%s' % comb[COMB_INDEX_D3D]
             log_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL], comb[COMB_INDEX_D3D])
+        elif host_os == 'darwin':
+            log_file = '%s/%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL])
 
         cmd += ' --write-full-results-to %s' % log_file
         result = _exec(cmd)
@@ -169,7 +171,7 @@ def test():
             _warning('Failed to run test "%s"' % cmd)
 
         # send report
-        if args.daily:
+        if args.daily and host_os == 'linux':
             json_result = json.load(open(log_file))
             result_type = json_result['num_failures_by_type']
             content = 'FAIL: %s, SKIP: %s, PASS %s\n' % (result_type['FAIL'], result_type['SKIP'], result_type['PASS'])
@@ -205,7 +207,7 @@ def _sync_chrome(chrome_rev_hash):
 
 def _build_chrome():
     _sync_chrome(args.build_chrome_hash)
-    (chrome_rev_hash, chrome_rev_number) = _get_rev()
+    (_, chrome_rev_number) = _get_rev()
     if os.path.exists('%s/%s.zip' % (build_dir, chrome_rev_number)):
         _info('Chrome has been built')
         return
