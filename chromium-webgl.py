@@ -58,11 +58,15 @@ def setup():
     build_dir = root_dir + '/build'
     chromium_src_dir = root_dir + '/chromium/src'
     depot_tools_dir = root_dir + '/depot_tools'
-    _setenv('PATH', depot_tools_dir)
     script_dir = root_dir + '/script'
     if args.daily:
         args.proxy = 'child-prc.intel.com:913'
 
+    if host_os == 'windows':
+        splitter = ';'
+    elif host_os in ['linux', 'darwin']:
+        splitter = ':'
+    _setenv('PATH', os.getenv('PATH') + splitter + depot_tools_dir)
 
 def build():
     if not args.build and not args.daily:
