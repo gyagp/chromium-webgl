@@ -46,9 +46,10 @@ examples:
     parser.add_argument('--test-mesa-rev', dest='test_mesa_rev', help='mesa revision', default='latest')
     parser.add_argument('--test-filter', dest='test_filter', help='WebGL CTS suite to test against', default='all')  # For smoke test, we may use conformance_attribs
     parser.add_argument('--test-verbose', dest='test_verbose', help='verbose mode of test', action='store_true')
+    parser.add_argument('--test-chrome', dest='test_chrome', help='test chrome', default='build')
     parser.add_argument('--daily', dest='daily', help='daily test', action='store_true')
-    parser.add_argument('--dryrun', dest='dryrun', help='dryrun', action='store_true')
     parser.add_argument('--run', dest='run', help='run', action='store_true')
+    parser.add_argument('--dryrun', dest='dryrun', help='dryrun', action='store_true')
     args = parser.parse_args()
 
 def setup():
@@ -59,8 +60,6 @@ def setup():
     chromium_src_dir = root_dir + '/chromium/src'
     depot_tools_dir = root_dir + '/depot_tools'
     script_dir = root_dir + '/script'
-    if args.daily:
-        args.proxy = 'child-prc.intel.com:913'
 
     if host_os == 'windows':
         splitter = ';'
@@ -68,8 +67,8 @@ def setup():
         splitter = ':'
     _setenv('PATH', os.getenv('PATH') + splitter + depot_tools_dir)
 
-def build():
-    if not args.build and not args.daily:
+def build(force=False):
+    if not args.build and not force:
         return
 
     # build mesa
@@ -77,10 +76,12 @@ def build():
         _chdir('/workspace/project/readonly/mesa')
         _exec('python mesa.py --sync --build')
 
-    _build_chrome()
+    _sync_chrome()
+    if args.test_chrome == 'build':
+        _build_chrome()
 
-def test():
-    if not args.test and not args.daily and not args.run:
+def test(force=False):
+    if not args.test and not force:
         return
 
     _chdir(build_dir)
@@ -108,31 +109,38 @@ def test():
             _setenv('LIBGL_DRIVERS_PATH', mesa_dir + '/lib/dri')
             _info('Use mesa at %s' % mesa_dir)
 
-    chrome_rev_number = args.test_chrome_rev
-    if chrome_rev_number == 'latest':
-        files = sorted(os.listdir('.'), reverse=True)
-        chrome_rev_number = files[0].replace('.zip', '')
-        if not re.match(r'\d{6}', chrome_rev_number):
-            _error('Could not find the correct revision')
+    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance'
+    if args.test_chrome == 'build':
+        chrome_rev_number = args.test_chrome_rev
+        if chrome_rev_number == 'latest':
+            files = sorted(os.listdir('.'), reverse=True)
+            chrome_rev_number = files[0].replace('.zip', '')
+            if not re.match(r'\d{6}', chrome_rev_number):
+                _error('Could not find the correct revision')
 
-    if not os.path.exists('%s' % chrome_rev_number):
-        if not os.path.exists('%s.zip' % chrome_rev_number):
-            _error('Could not find Chromium revision %s' % chrome_rev_number)
-        _ensure_dir(chrome_rev_number)
-        _exec('unzip %s.zip -d %s' % (chrome_rev_number, chrome_rev_number))
+        if not os.path.exists('%s' % chrome_rev_number):
+            if not os.path.exists('%s.zip' % chrome_rev_number):
+                _error('Could not find Chromium revision %s' % chrome_rev_number)
+            _ensure_dir(chrome_rev_number)
+            _exec('unzip %s.zip -d %s' % (chrome_rev_number, chrome_rev_number))
 
-    _chdir(build_dir + '/' + chrome_rev_number)
-    chrome_binary_suffix = ''
-    if host_os == 'windows':
-        chrome_binary_suffix += '.exe'
+        _chdir(build_dir + '/' + chrome_rev_number)
+        chrome_binary_suffix = ''
+        if host_os == 'windows':
+            chrome_binary_suffix += '.exe'
 
-    if args.run:
-        param = '--enable-experimental-web-platform-features --disable-gpu-process-for-dx12-vulkan-info-collection --disable-domain-blocking-for-3d-apis --disable-gpu-process-crash-limit --disable-blink-features=WebXR --js-flags=--expose-gc --disable-gpu-watchdog --autoplay-policy=no-user-gesture-required --disable-features=UseSurfaceLayerForVideo --enable-net-benchmarking --metrics-recording-only --no-default-browser-check --no-first-run --ignore-background-tasks --enable-gpu-benchmarking --deny-permission-prompts --autoplay-policy=no-user-gesture-required --disable-background-networking --disable-component-extensions-with-background-pages --disable-default-apps --disable-search-geolocation-disclosure --enable-crash-reporter-for-testing --disable-component-update'
-        #param = '--enable-experimental-web-platform-features'
-        _exec('out/Default/chrome%s %s http://wp-27.sh.intel.com/workspace/project/readonly/WebGL/sdk/tests/webgl-conformance-tests.html?version=2.0.1' % (chrome_binary_suffix, param))
-        return
+        if args.run:
+            param = '--enable-experimental-web-platform-features --disable-gpu-process-for-dx12-vulkan-info-collection --disable-domain-blocking-for-3d-apis --disable-gpu-process-crash-limit --disable-blink-features=WebXR --js-flags=--expose-gc --disable-gpu-watchdog --autoplay-policy=no-user-gesture-required --disable-features=UseSurfaceLayerForVideo --enable-net-benchmarking --metrics-recording-only --no-default-browser-check --no-first-run --ignore-background-tasks --enable-gpu-benchmarking --deny-permission-prompts --autoplay-policy=no-user-gesture-required --disable-background-networking --disable-component-extensions-with-background-pages --disable-default-apps --disable-search-geolocation-disclosure --enable-crash-reporter-for-testing --disable-component-update'
+            #param = '--enable-experimental-web-platform-features'
+            _exec('out/Default/chrome%s %s http://wp-27.sh.intel.com/workspace/project/readonly/WebGL/sdk/tests/webgl-conformance-tests.html?version=2.0.1' % (chrome_binary_suffix, param))
+            return
 
-    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --browser=exact --browser-executable=out/Default/chrome%s' % chrome_binary_suffix
+        common_cmd += ' --browser=exact --browser-executable=out/Default/chrome%s' % chrome_binary_suffix
+    elif args.test_chrome == 'canary':
+        chrome_rev_number = 'canary'
+        _chdir(chromium_src_dir)
+
+        common_cmd += ' --browser=canary'
     if args.test_filter != 'all':
         common_cmd += ' --test-filter=%s' % args.test_filter
     skip_filter = skip[host_os]
@@ -196,7 +204,21 @@ def run():
     if not args.run:
         return
 
-def _sync_chrome(chrome_rev_hash):
+    test(force=True)
+
+def daily():
+    if not args.daily:
+        return
+
+    build(force=True)
+    test(force=True)
+
+def _sync_chrome():
+    _chdir(depot_tools_dir)
+    _exec('git pull')
+
+    chrome_rev_hash = args.build_chrome_hash
+
     if chrome_rev_hash != 'latest':
         (chrome_rev_hash_tmp, _) = _get_rev()
         if chrome_rev_hash == chrome_rev_hash_tmp:
@@ -210,7 +232,6 @@ def _sync_chrome(chrome_rev_hash):
     _exec(cmd)
 
 def _build_chrome():
-    _sync_chrome(args.build_chrome_hash)
     (_, chrome_rev_number) = _get_rev()
     if os.path.exists('%s/%s.zip' % (build_dir, chrome_rev_number)):
         _info('Chrome has been built')
@@ -230,9 +251,6 @@ def _build_chrome():
         f.write(content)
         f.close()
         _setenv('NO_AUTH_BOTO_CONFIG', script_dir + '/' + boto_file)
-
-    _chdir(depot_tools_dir)
-    _exec('git pull')
 
     _chdir(chromium_src_dir + '/build/util')
     _exec('python lastchange.py -o LASTCHANGE')
@@ -395,3 +413,4 @@ if __name__ == '__main__':
     build()
     test()
     run()
+    daily()
