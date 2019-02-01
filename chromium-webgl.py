@@ -67,6 +67,9 @@ def setup():
         splitter = ':'
     _setenv('PATH', os.getenv('PATH') + splitter + depot_tools_dir)
 
+    if args.daily and host_os == 'darwin':
+        args.test_chrome = 'canary'
+
 def build(force=False):
     if not args.build and not force:
         return
