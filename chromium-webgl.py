@@ -22,6 +22,7 @@ chromium_src_dir = ''
 depot_tools_dir = ''
 script_dir = ''
 host_os = platform.system().lower()
+mesa_install_dir = '/workspace/install'
 
 skip = {
     'linux': ['conformance2_textures_misc_tex_3d_size_limit'],
@@ -89,16 +90,15 @@ def test(force=False):
 
     _chdir(build_dir)
     if host_os == 'linux':
-        mesa_install_dir = '/workspace/install'
         mesa_rev_number = args.test_mesa_rev
-        files = sorted(os.listdir(mesa_install_dir), reverse=True)
         if mesa_rev_number == 'system':
             _info('Use system Mesa')
         else:
             if mesa_rev_number == 'latest':
-                mesa_dir = files[0]
+                mesa_dir = _get_latest('mesa')
                 mesa_rev_number = re.match('mesa-master-release-(.*)-', mesa_dir).group(1)
             else:
+                files = os.listdir(mesa_install_dir)
                 for file in files:
                     match = re.match('mesa-master-release-%s' % mesa_rev_number, file)
                     if match:
@@ -116,8 +116,8 @@ def test(force=False):
     if args.test_chrome == 'build':
         chrome_rev_number = args.test_chrome_rev
         if chrome_rev_number == 'latest':
-            files = sorted(os.listdir('.'), reverse=True)
-            chrome_rev_number = files[0].replace('.zip', '')
+            chrome_file = _get_latest('chrome')
+            chrome_rev_number = chrome_file.replace('.zip', '')
             if not re.match(r'\d{6}', chrome_rev_number):
                 _error('Could not find the correct revision')
 
@@ -338,6 +338,27 @@ def _get_rev():
         _error('Failed to find the revision of Chromium')
 
     return (chrome_rev_hash, chrome_rev_number)
+
+def _get_latest(type):
+    if type == 'mesa':
+        rev_dir = mesa_install_dir
+        rev_pattern = 'mesa-master-release-(.*)-'
+    elif type == 'chrome':
+        rev_dir = build_dir
+        rev_pattern = '(.*).zip'
+
+    latest_rev = -1
+    latest_file = ''
+    files = os.listdir(rev_dir)
+    for file in files:
+        match = re.search(rev_pattern, file)
+        if match:
+            tmp_rev = int(match.group(1))
+            if tmp_rev > latest_rev:
+                latest_file = file
+                latest_rev = tmp_rev
+
+    return latest_file
 
 def _setenv(env, value):
     if value:
