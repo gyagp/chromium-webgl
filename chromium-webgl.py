@@ -112,7 +112,7 @@ def test(force=False):
             _setenv('LIBGL_DRIVERS_PATH', mesa_dir + '/lib/dri')
             _info('Use mesa at %s' % mesa_dir)
 
-    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance'
+    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --disable-log-uploads'
     if args.test_chrome == 'build':
         chrome_rev_number = args.test_chrome_rev
         if chrome_rev_number == 'latest':
