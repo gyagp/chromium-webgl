@@ -51,6 +51,7 @@ examples:
     parser.add_argument('--daily', dest='daily', help='daily test', action='store_true')
     parser.add_argument('--run', dest='run', help='run', action='store_true')
     parser.add_argument('--dryrun', dest='dryrun', help='dryrun', action='store_true')
+    parser.add_argument('--skip-sync', dest='skip_sync', help='skip sync', action='store_true')
     args = parser.parse_args()
 
 def setup():
@@ -80,7 +81,8 @@ def build(force=False):
         _chdir('/workspace/project/readonly/mesa')
         _exec('python mesa.py --sync --build')
 
-    _sync_chrome()
+    if not args.skip_sync:
+        _sync_chrome()
     if args.test_chrome == 'build':
         _build_chrome()
 
@@ -259,12 +261,12 @@ def _build_chrome():
     _exec('python lastchange.py -o LASTCHANGE')
     _chdir(chromium_src_dir)
     gn_args = 'proprietary_codecs=true ffmpeg_branding=\\\"Chrome\\\" is_debug=false'
-    gn_args += ' symbol_level=0 is_component_build=false remove_webcore_debug_symbols=true enable_nacl=false'
+    gn_args += ' symbol_level=0 is_component_build=false enable_nacl=false'
     cmd = 'gn --args=\"%s\" gen out/Default' % gn_args
     result = _exec(cmd)
     if result[0]:
         _error('Failed to execute gn command')
-    result = _exec('ninja -j%s -C out/Default chrome' % cpu_count)
+    result = _exec('ninja -j%s -C out/Default chrome chromedriver' % cpu_count)
     if result[0]:
         _error('Failed to build Chromium')
 
