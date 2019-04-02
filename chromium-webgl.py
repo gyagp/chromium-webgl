@@ -67,7 +67,7 @@ def setup():
         splitter = ';'
     elif host_os in ['linux', 'darwin']:
         splitter = ':'
-    _setenv('PATH', os.getenv('PATH') + splitter + depot_tools_dir)
+    _setenv('PATH', depot_tools_dir + splitter + os.getenv('PATH'))
 
     if args.daily and host_os == 'darwin':
         args.test_chrome = 'canary'
@@ -137,7 +137,7 @@ def test(force=False):
         if args.run:
             param = '--enable-experimental-web-platform-features --disable-gpu-process-for-dx12-vulkan-info-collection --disable-domain-blocking-for-3d-apis --disable-gpu-process-crash-limit --disable-blink-features=WebXR --js-flags=--expose-gc --disable-gpu-watchdog --autoplay-policy=no-user-gesture-required --disable-features=UseSurfaceLayerForVideo --enable-net-benchmarking --metrics-recording-only --no-default-browser-check --no-first-run --ignore-background-tasks --enable-gpu-benchmarking --deny-permission-prompts --autoplay-policy=no-user-gesture-required --disable-background-networking --disable-component-extensions-with-background-pages --disable-default-apps --disable-search-geolocation-disclosure --enable-crash-reporter-for-testing --disable-component-update'
             #param = '--enable-experimental-web-platform-features'
-            _exec('out/Default/chrome%s %s http://wp-27.sh.intel.com/workspace/project/readonly/WebGL/sdk/tests/webgl-conformance-tests.html?version=2.0.1' % (chrome_binary_suffix, param))
+            _exec('out\Default\chrome%s %s http://wp-27.sh.intel.com/workspace/project/readonly/WebGL/sdk/tests/webgl-conformance-tests.html?version=2.0.1' % (chrome_binary_suffix, param))
             return
 
         common_cmd += ' --browser=exact --browser-executable=out/Default/chrome%s' % chrome_binary_suffix
@@ -347,7 +347,7 @@ def _get_latest(type):
         rev_pattern = 'mesa-master-release-(.*)-'
     elif type == 'chrome':
         rev_dir = build_dir
-        rev_pattern = '(.*).zip'
+        rev_pattern = '(\d{6}).zip'
 
     latest_rev = -1
     latest_file = ''
