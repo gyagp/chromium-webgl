@@ -231,7 +231,7 @@ def _sync_chrome():
 
     _chdir(chromium_src_dir)
     _exec('git pull')
-    cmd = 'gclient sync -R -j%s' % cpu_count
+    cmd = 'gclient sync -R --break_repo_locks --delete_unversioned_trees -j%s' % cpu_count
     if chrome_rev_hash != 'latest':
         cmd += ' --revision=%s' % chrome_rev_hash
     _exec(cmd)
