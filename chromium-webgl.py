@@ -130,17 +130,18 @@ def test(force=False):
             _exec('unzip %s.zip -d %s' % (chrome_rev_number, chrome_rev_number))
 
         _chdir(build_dir + '/' + chrome_rev_number)
-        chrome_binary_suffix = ''
+
         if host_os == 'windows':
-            chrome_binary_suffix += '.exe'
+            chrome = 'out\Default\chrome.exe'
+        else:
+            chrome = 'out/Default/chrome'
 
         if args.run:
             param = '--enable-experimental-web-platform-features --disable-gpu-process-for-dx12-vulkan-info-collection --disable-domain-blocking-for-3d-apis --disable-gpu-process-crash-limit --disable-blink-features=WebXR --js-flags=--expose-gc --disable-gpu-watchdog --autoplay-policy=no-user-gesture-required --disable-features=UseSurfaceLayerForVideo --enable-net-benchmarking --metrics-recording-only --no-default-browser-check --no-first-run --ignore-background-tasks --enable-gpu-benchmarking --deny-permission-prompts --autoplay-policy=no-user-gesture-required --disable-background-networking --disable-component-extensions-with-background-pages --disable-default-apps --disable-search-geolocation-disclosure --enable-crash-reporter-for-testing --disable-component-update'
-            #param = '--enable-experimental-web-platform-features'
-            _exec('out\Default\chrome%s %s http://wp-27.sh.intel.com/workspace/project/readonly/WebGL/sdk/tests/webgl-conformance-tests.html?version=2.0.1' % (chrome_binary_suffix, param))
+            _exec('%s %s http://wp-27.sh.intel.com/workspace/project/readonly/WebGL/sdk/tests/webgl-conformance-tests.html?version=2.0.1' % (chrome, param))
             return
 
-        common_cmd += ' --browser=exact --browser-executable=out/Default/chrome%s' % chrome_binary_suffix
+        common_cmd += ' --browser=exact --browser-executable=%s' % chrome
     elif args.test_chrome == 'canary':
         chrome_rev_number = 'canary'
         _chdir(chromium_src_dir)
