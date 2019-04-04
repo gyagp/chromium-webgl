@@ -25,7 +25,8 @@ host_os = platform.system().lower()
 mesa_install_dir = '/workspace/install'
 
 skip = {
-    'linux': ['WebglConformance_conformance2_textures_misc_tex_3d_size_limit'],
+    #'linux': ['WebglConformance_conformance2_textures_misc_tex_3d_size_limit'],
+    'linux': [],
     'windows': [],
     'darwin': [],
 }
