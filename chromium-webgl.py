@@ -23,6 +23,7 @@ depot_tools_dir = ''
 script_dir = ''
 host_os = platform.system().lower()
 mesa_install_dir = '/workspace/install'
+test_chrome = ''
 
 skip = {
     #'linux': ['WebglConformance_conformance2_textures_misc_tex_3d_size_limit'],
@@ -48,7 +49,7 @@ examples:
     parser.add_argument('--test-mesa-rev', dest='test_mesa_rev', help='mesa revision', default='latest')
     parser.add_argument('--test-filter', dest='test_filter', help='WebGL CTS suite to test against', default='all')  # For smoke test, we may use conformance_attribs
     parser.add_argument('--test-verbose', dest='test_verbose', help='verbose mode of test', action='store_true')
-    parser.add_argument('--test-chrome', dest='test_chrome', help='test chrome', default='build')
+    parser.add_argument('--test-chrome', dest='test_chrome', help='test chrome', default='default')
     parser.add_argument('--daily', dest='daily', help='daily test', action='store_true')
     parser.add_argument('--run', dest='run', help='run', action='store_true')
     parser.add_argument('--dryrun', dest='dryrun', help='dryrun', action='store_true')
@@ -56,7 +57,7 @@ examples:
     args = parser.parse_args()
 
 def setup():
-    global build_dir, chromium_src_dir, depot_tools_dir, script_dir
+    global build_dir, chromium_src_dir, depot_tools_dir, script_dir, test_chrome
 
     root_dir = os.path.dirname(os.path.split(os.path.realpath(__file__))[0]).replace('\\', '/')
     build_dir = root_dir + '/build'
@@ -70,8 +71,12 @@ def setup():
         splitter = ':'
     _setenv('PATH', depot_tools_dir + splitter + os.getenv('PATH'))
 
-    if args.daily and host_os == 'darwin':
-        args.test_chrome = 'canary'
+    if host_os == 'darwin':
+        if args.test_chrome == 'default':
+            test_chrome = 'canary'
+    else:
+        if args.test_chrome == 'default':
+            test_chrome = 'build'
 
 def build(force=False):
     if not args.build and not force:
@@ -84,7 +89,7 @@ def build(force=False):
 
     if not args.skip_sync:
         _sync_chrome()
-    if args.test_chrome == 'build':
+    if test_chrome == 'build':
         _build_chrome()
 
 def test(force=False):
@@ -116,7 +121,7 @@ def test(force=False):
             _info('Use mesa at %s' % mesa_dir)
 
     common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --disable-log-uploads'
-    if args.test_chrome == 'build':
+    if test_chrome == 'build':
         chrome_rev_number = args.test_chrome_rev
         if chrome_rev_number == 'latest':
             chrome_file = _get_latest('chrome')
@@ -143,11 +148,11 @@ def test(force=False):
             return
 
         common_cmd += ' --browser=exact --browser-executable=%s' % chrome
-    elif args.test_chrome == 'canary':
+    elif test_chrome == 'canary':
         chrome_rev_number = 'canary'
         _chdir(chromium_src_dir)
 
-        common_cmd += ' --browser=canary'
+        common_cmd += ' --browser=%s' % test_chrome
     if args.test_filter != 'all':
         common_cmd += ' --test-filter=%s' % args.test_filter
     skip_filter = skip[host_os]
