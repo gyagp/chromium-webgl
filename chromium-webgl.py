@@ -25,7 +25,7 @@ host_os = platform.system().lower()
 mesa_install_dir = '/workspace/install'
 
 skip = {
-    'linux': ['conformance2_textures_misc_tex_3d_size_limit'],
+    'linux': ['WebglConformance_conformance2_textures_misc_tex_3d_size_limit'],
     'windows': [],
     'darwin': [],
 }
@@ -152,7 +152,7 @@ def test(force=False):
     skip_filter = skip[host_os]
     if skip_filter:
         for skip_tmp in skip_filter:
-            common_cmd += ' --skip=gpu_tests.webgl_conformance_integration_test.WebGLConformanceIntegrationTest.WebglConformance_%s' % skip_tmp
+            common_cmd += ' --skip=%s' % skip_tmp
     if args.test_verbose:
         common_cmd += ' --verbose'
 
