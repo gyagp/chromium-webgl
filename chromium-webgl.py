@@ -152,7 +152,7 @@ def test(force=False):
         chrome_rev_number = test_chrome
         if host_os == 'darwin':
             if test_chrome == 'canary':
-                chrome = '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary'
+                chrome = '"/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"'
             else:
                 _error('test_chrome is not supported')
         elif host_os == 'linux':
