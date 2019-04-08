@@ -155,6 +155,20 @@ def test(force=False):
         common_cmd += ' --browser=%s' % test_chrome
         _chdir(chrome_src_dir)
         chrome_rev_number = test_chrome
+        if host_os == 'darwin':
+            if test_chrome == 'canary':
+                chrome = '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary'
+            else:
+                _error('test_chrome is not supported')
+        elif host_os == 'linux':
+            if test_chrome == 'canary':
+                chrome = '/usr/bin/google-chrome-unstable'
+            elif test_chrome == 'stable':
+                chrome = '/usr/bin/google-chrome-stable'
+            else:
+                _error('test_chrome is not supported')
+        else:
+            _error('test_chrome is not supported')
 
     if args.test_filter != 'all':
         common_cmd += ' --test-filter=%s' % args.test_filter
