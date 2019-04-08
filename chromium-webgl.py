@@ -18,7 +18,7 @@ boto_file = '.boto'
 cpu_count = multiprocessing.cpu_count()
 
 build_dir = ''
-chromium_src_dir = ''
+chrome_src_dir = ''
 depot_tools_dir = ''
 script_dir = ''
 host_os = platform.system().lower()
@@ -57,11 +57,11 @@ examples:
     args = parser.parse_args()
 
 def setup():
-    global build_dir, chromium_src_dir, depot_tools_dir, script_dir, test_chrome
+    global build_dir, chrome_src_dir, depot_tools_dir, script_dir, test_chrome
 
     root_dir = os.path.dirname(os.path.split(os.path.realpath(__file__))[0]).replace('\\', '/')
     build_dir = root_dir + '/build'
-    chromium_src_dir = root_dir + '/chromium/src'
+    chrome_src_dir = root_dir + '/chromium/src'
     depot_tools_dir = root_dir + '/depot_tools'
     script_dir = root_dir + '/script'
 
@@ -71,11 +71,12 @@ def setup():
         splitter = ':'
     _setenv('PATH', depot_tools_dir + splitter + os.getenv('PATH'))
 
+    test_chrome = args.test_chrome
     if host_os == 'darwin':
-        if args.test_chrome == 'default':
+        if test_chrome == 'default':
             test_chrome = 'canary'
     else:
-        if args.test_chrome == 'default':
+        if test_chrome == 'default':
             test_chrome = 'build'
 
 def build(force=False):
@@ -85,7 +86,9 @@ def build(force=False):
     # build mesa
     if args.daily and host_os == 'linux':
         _chdir('/workspace/project/readonly/mesa')
-        _exec('python mesa.py --sync --build')
+        if not args.skip_sync:
+            _exec('python mesa.py --sync')
+        _exec('python mesa.py --build')
 
     if not args.skip_sync:
         _sync_chrome()
@@ -96,7 +99,6 @@ def test(force=False):
     if not args.test and not force:
         return
 
-    _chdir(build_dir)
     if host_os == 'linux':
         mesa_rev_number = args.test_mesa_rev
         if mesa_rev_number == 'system':
@@ -129,6 +131,7 @@ def test(force=False):
             if not re.match(r'\d{6}', chrome_rev_number):
                 _error('Could not find the correct revision')
 
+        _chdir(build_dir)
         if not os.path.exists('%s' % chrome_rev_number):
             if not os.path.exists('%s.zip' % chrome_rev_number):
                 _error('Could not find Chromium revision %s' % chrome_rev_number)
@@ -148,11 +151,11 @@ def test(force=False):
             return
 
         common_cmd += ' --browser=exact --browser-executable=%s' % chrome
-    elif test_chrome == 'canary':
-        chrome_rev_number = 'canary'
-        _chdir(chromium_src_dir)
-
+    else:
         common_cmd += ' --browser=%s' % test_chrome
+        _chdir(chrome_src_dir)
+        chrome_rev_number = test_chrome
+
     if args.test_filter != 'all':
         common_cmd += ' --test-filter=%s' % args.test_filter
     skip_filter = skip[host_os]
@@ -199,7 +202,7 @@ def test(force=False):
             json_result = json.load(open(log_file))
             result_type = json_result['num_failures_by_type']
             content = 'FAIL: %s, SKIP: %s, PASS %s\n' % (result_type['FAIL'], result_type['SKIP'], result_type['PASS'])
-            test_results = json_result['tests']['gpu_tests']['webgl_conformance_integration_test']['WebGLConformanceIntegrationTest']
+            test_results = json_result['tests']
             fails = []
             for key in test_results:
                 if test_results[key]['actual'] == 'FAIL':
@@ -236,7 +239,7 @@ def _sync_chrome():
         if chrome_rev_hash == chrome_rev_hash_tmp:
             return
 
-    _chdir(chromium_src_dir)
+    _chdir(chrome_src_dir)
     _exec('git pull')
     cmd = 'gclient sync -R --break_repo_locks --delete_unversioned_trees -j%s' % cpu_count
     if chrome_rev_hash != 'latest':
@@ -264,9 +267,9 @@ def _build_chrome():
         f.close()
         _setenv('NO_AUTH_BOTO_CONFIG', script_dir + '/' + boto_file)
 
-    _chdir(chromium_src_dir + '/build/util')
+    _chdir(chrome_src_dir + '/build/util')
     _exec('python lastchange.py -o LASTCHANGE')
-    _chdir(chromium_src_dir)
+    _chdir(chrome_src_dir)
     gn_args = 'proprietary_codecs=true ffmpeg_branding=\\\"Chrome\\\" is_debug=false'
     gn_args += ' symbol_level=0 is_component_build=false enable_nacl=false'
     cmd = 'gn --args=\"%s\" gen out/Default' % gn_args
@@ -331,7 +334,7 @@ def _get_datetime(format='%Y%m%d%H%M%S'):
     return time.strftime(format, time.localtime())
 
 def _get_rev():
-    _chdir(chromium_src_dir)
+    _chdir(chrome_src_dir)
     cmd = 'git log --shortstat -1'
     result = _exec(cmd, show_cmd=False, return_out=True)
     lines = result[1].split('\n')
