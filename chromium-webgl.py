@@ -213,18 +213,45 @@ def test(force=False):
 
         # send report
         if args.daily and host_os == 'linux':
+            pass_fail = []
+            fail_pass = []
+            fail_fail = []
+
+            def parse_result(key, val, path):
+                if 'expected' in val:
+                    if val['expected'] == 'PASS' and val['actual'] == 'FAIL':
+                        pass_fail.append(path)
+                    elif val['expected'] == 'FAIL' and val['actual'] == 'PASS':
+                        fail_pass.append(path)
+                    elif val['expected'] == 'FAIL' and val['actual'] == 'FAIL':
+                        fail_fail.append(path)
+                else:
+                    for new_key, new_val in val.items():
+                        parse_result(new_key, new_val, '%s/%s' % (path, new_key))
+
+
             json_result = json.load(open(log_file))
             result_type = json_result['num_failures_by_type']
             content = 'FAIL: %s, SKIP: %s, PASS %s\n' % (result_type['FAIL'], result_type['SKIP'], result_type['PASS'])
             test_results = json_result['tests']
             fails = []
-            for key in test_results:
-                if test_results[key]['actual'] == 'FAIL':
-                    fails.append(key)
-            if fails:
-                content += '[FAIL]\n'
-                for fail in fails:
-                    content += fail + '\n'
+            for key, val in test_results.items():
+                parse_result(key, val, key)
+
+            content += '[PASS_FAIL(%s)]\n' % len(pass_fail)
+            if pass_fail:
+                for c in pass_fail:
+                    content += c + '\n'
+
+            content += '[FAIL_PASS(%s)]\n' % len(fail_pass)
+            if fail_pass:
+                for c in fail_pass:
+                    content += c + '\n'
+
+            content += '[FAIL_FAIL(%s)]\n' % len(fail_fail)
+            if fail_fail:
+                for c in fail_fail:
+                    content += c + '\n'
 
             subject = 'WebGL CTS on Chrome %s and Mesa %s has %s Regression' % (chrome_rev_number, mesa_rev_number, json_result['num_regressions'])
             _send_email('webperf@intel.com', 'yang.gu@intel.com', subject, content)
@@ -243,6 +270,39 @@ def daily():
     test(force=True)
 
 def _sync_chrome():
+    if args.proxy:
+        _setenv('http_proxy', args.proxy)
+        _setenv('https_proxy', args.proxy)
+
+        _chdir(script_dir)
+        _ensure_nofile(boto_file)
+
+        proxy_address = ''
+        proxy_port = ''
+        proxy_user = ''
+        proxy_pass = ''
+        match = re.search('(.*)@(.*)', args.proxy)
+        if match:
+            proxy_user_pass_parts = match.group(1).split(':')
+            proxy_user = proxy_user_pass_parts[0]
+            proxy_pass = proxy_user_pass_parts[1]
+            proxy_address_port_parts = match.group(2).split(':')
+            proxy_address = proxy_address_port_parts[0]
+            proxy_port = proxy_address_port_parts[1]
+        else:
+            proxy_address_port_parts = args.proxy.split(':')
+            proxy_address = proxy_address_port_parts[0]
+            proxy_port = proxy_address_port_parts[1]
+
+        f = open(boto_file, 'w')
+        content = '[Boto]\nproxy_rdns=True\nproxy=%s\nproxy_port=%s\n' % (proxy_address, proxy_port)
+        if proxy_user:
+            content += 'proxy_user=%s\nproxy_pass=%s' % (proxy_user, proxy_pass)
+        f.write(content)
+        f.close()
+        print content
+        _setenv('NO_AUTH_BOTO_CONFIG', script_dir + '/' + boto_file)
+
     _chdir(depot_tools_dir)
     _exec('git pull')
 
@@ -267,19 +327,6 @@ def _build_chrome():
         return
 
     _setenv('DEPOT_TOOLS_WIN_TOOLCHAIN', 0)
-
-    if args.proxy:
-        _setenv('http_proxy', args.proxy)
-        _setenv('https_proxy', args.proxy)
-
-        _chdir(script_dir)
-        _ensure_nofile(boto_file)
-        proxy_parts = args.proxy.split(':')
-        f = open(boto_file, 'w')
-        content = '[Boto]\nproxy=%s\nproxy_port=%s\nproxy_rdns=True' % (proxy_parts[0], proxy_parts[1])
-        f.write(content)
-        f.close()
-        _setenv('NO_AUTH_BOTO_CONFIG', script_dir + '/' + boto_file)
 
     _chdir(chrome_src_dir + '/build/util')
     _exec('python lastchange.py -o LASTCHANGE')
