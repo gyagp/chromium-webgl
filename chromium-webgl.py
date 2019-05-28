@@ -24,6 +24,9 @@ script_dir = ''
 host_os = platform.system().lower()
 mesa_install_dir = '/workspace/install'
 test_chrome = ''
+pass_fail = []
+fail_pass = []
+fail_fail = []
 
 skip = {
     #'linux': ['WebglConformance_conformance2_textures_misc_tex_3d_size_limit'],
@@ -50,6 +53,7 @@ examples:
     parser.add_argument('--test-filter', dest='test_filter', help='WebGL CTS suite to test against', default='all')  # For smoke test, we may use conformance_attribs
     parser.add_argument('--test-verbose', dest='test_verbose', help='verbose mode of test', action='store_true')
     parser.add_argument('--test-chrome', dest='test_chrome', help='test chrome', default='default')
+    parser.add_argument('--test-combs', dest='test_combs', help='test combs, split by comma, like "0,2"', default='all')
     parser.add_argument('--daily', dest='daily', help='daily test', action='store_true')
     parser.add_argument('--run', dest='run', help='run', action='store_true')
     parser.add_argument('--dryrun', dest='dryrun', help='dryrun', action='store_true')
@@ -186,15 +190,22 @@ def test(force=False):
     COMB_INDEX_WEBGL = 0
     COMB_INDEX_D3D = 1
     if host_os in ['linux', 'darwin']:
-        combs = [['2.0.1']]
+        all_combs = [['2.0.1']]
     elif host_os == 'windows':
-        combs = [
+        all_combs = [
             ['1.0.3', '9'],
             ['1.0.3', '11'],
             ['2.0.1', '11'],
         ]
 
-    for comb in combs:
+    test_combs = []
+    if args.test_combs == 'all':
+        test_combs = all_combs
+    else:
+        for i in args.test_combs.split(','):
+            test_combs.append(all_combs[int(i)])
+
+    for comb in test_combs:
         cmd = common_cmd + ' --webgl-conformance-version=%s' % comb[COMB_INDEX_WEBGL]
         log_file = ''
         if host_os == 'linux':
@@ -211,50 +222,39 @@ def test(force=False):
         if result[0]:
             _warning('Failed to run test "%s"' % cmd)
 
-        # send report
-        if args.daily and host_os == 'linux':
-            pass_fail = []
-            fail_pass = []
-            fail_fail = []
+        # report
+        json_result = json.load(open(log_file))
+        result_type = json_result['num_failures_by_type']
+        content = 'FAIL: %s, SKIP: %s, PASS %s\n' % (result_type['FAIL'], result_type['SKIP'], result_type['PASS'])
+        test_results = json_result['tests']
+        for key, val in test_results.items():
+            parse_result(key, val, key)
 
-            def parse_result(key, val, path):
-                if 'expected' in val:
-                    if val['expected'] == 'PASS' and val['actual'] == 'FAIL':
-                        pass_fail.append(path)
-                    elif val['expected'] == 'FAIL' and val['actual'] == 'PASS':
-                        fail_pass.append(path)
-                    elif val['expected'] == 'FAIL' and val['actual'] == 'FAIL':
-                        fail_fail.append(path)
-                else:
-                    for new_key, new_val in val.items():
-                        parse_result(new_key, new_val, '%s/%s' % (path, new_key))
+        content += '[PASS_FAIL(%s)]\n' % len(pass_fail)
+        if pass_fail:
+            for c in pass_fail:
+                content += c + '\n'
 
+        content += '[FAIL_PASS(%s)]\n' % len(fail_pass)
+        if fail_pass:
+            for c in fail_pass:
+                content += c + '\n'
 
-            json_result = json.load(open(log_file))
-            result_type = json_result['num_failures_by_type']
-            content = 'FAIL: %s, SKIP: %s, PASS %s\n' % (result_type['FAIL'], result_type['SKIP'], result_type['PASS'])
-            test_results = json_result['tests']
-            fails = []
-            for key, val in test_results.items():
-                parse_result(key, val, key)
+        content += '[FAIL_FAIL(%s)]\n' % len(fail_fail)
+        if fail_fail:
+            for c in fail_fail:
+                content += c + '\n'
 
-            content += '[PASS_FAIL(%s)]\n' % len(pass_fail)
-            if pass_fail:
-                for c in pass_fail:
-                    content += c + '\n'
-
-            content += '[FAIL_PASS(%s)]\n' % len(fail_pass)
-            if fail_pass:
-                for c in fail_pass:
-                    content += c + '\n'
-
-            content += '[FAIL_FAIL(%s)]\n' % len(fail_fail)
-            if fail_fail:
-                for c in fail_fail:
-                    content += c + '\n'
-
+        if host_os == 'linux':
             subject = 'WebGL CTS on Chrome %s and Mesa %s has %s Regression' % (chrome_rev_number, mesa_rev_number, json_result['num_regressions'])
+        else:
+            subject = 'WebGL CTS on Chrome %s has %s Regression' % (chrome_rev_number, json_result['num_regressions'])
+
+        if args.daily and host_os == 'linux':
             _send_email('webperf@intel.com', 'yang.gu@intel.com', subject, content)
+        else:
+            print(subject)
+            print(content)
 
 def run():
     if not args.run:
@@ -454,6 +454,19 @@ def _msg(msg):
     m = inspect.stack()[1][3].upper().lstrip('_')
     m = '[' + m + '] ' + msg
     print m
+
+def parse_result(key, val, path):
+    if 'expected' in val:
+        if val['expected'] == 'PASS' and val['actual'] == 'FAIL':
+            pass_fail.append(path)
+        elif val['expected'] == 'FAIL' and val['actual'] == 'PASS':
+            fail_pass.append(path)
+        elif val['expected'] == 'FAIL' and val['actual'] == 'FAIL':
+            fail_fail.append(path)
+    else:
+        for new_key, new_val in val.items():
+            parse_result(new_key, new_val, '%s/%s' % (path, new_key))
+
 
 def _send_email(sender, to, subject, content, type='plain'):
     if isinstance(to, list):
