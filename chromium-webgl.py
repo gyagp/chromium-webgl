@@ -24,9 +24,15 @@ script_dir = ''
 host_os = platform.system().lower()
 mesa_install_dir = '/workspace/install'
 test_chrome = ''
-pass_fail = []
-fail_pass = []
 fail_fail = []
+fail_pass = []
+pass_fail = []
+pass_pass = []
+chrome_rev_number = 0
+mesa_rev_number = 0
+result_file = ''
+final_details = ''
+final_summary = ''
 
 skip = {
     #'linux': ['WebglConformance_conformance2_textures_misc_tex_3d_size_limit'],
@@ -57,11 +63,12 @@ examples:
     parser.add_argument('--daily', dest='daily', help='daily test', action='store_true')
     parser.add_argument('--run', dest='run', help='run', action='store_true')
     parser.add_argument('--dryrun', dest='dryrun', help='dryrun', action='store_true')
+    parser.add_argument('--report', dest='report', help='report file')
     parser.add_argument('--skip-sync', dest='skip_sync', help='skip sync', action='store_true')
     args = parser.parse_args()
 
 def setup():
-    global build_dir, chrome_src_dir, depot_tools_dir, script_dir, test_chrome
+    global build_dir, chrome_src_dir, depot_tools_dir, script_dir, test_chrome, result_file
 
     root_dir = os.path.dirname(os.path.split(os.path.realpath(__file__))[0]).replace('\\', '/')
     build_dir = root_dir + '/build'
@@ -83,6 +90,9 @@ def setup():
         if test_chrome == 'default':
             test_chrome = 'build'
 
+    if args.report:
+        result_file = args.report
+
 def build(force=False):
     if not args.build and not force:
         return
@@ -100,6 +110,8 @@ def build(force=False):
         _build_chrome()
 
 def test(force=False):
+    global chrome_rev_number, mesa_rev_number, result_file
+
     if not args.test and not force:
         return
 
@@ -207,54 +219,25 @@ def test(force=False):
 
     for comb in test_combs:
         cmd = common_cmd + ' --webgl-conformance-version=%s' % comb[COMB_INDEX_WEBGL]
-        log_file = ''
+        result_file = ''
         if host_os == 'linux':
-            log_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, mesa_rev_number, comb[COMB_INDEX_WEBGL])
+            result_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, mesa_rev_number, comb[COMB_INDEX_WEBGL])
         elif host_os == 'windows':
             if comb[COMB_INDEX_D3D] != '11':
                 cmd += ' --extra-browser-args=--use-angle=d3d%s' % comb[COMB_INDEX_D3D]
-            log_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL], comb[COMB_INDEX_D3D])
+            result_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL], comb[COMB_INDEX_D3D])
         elif host_os == 'darwin':
-            log_file = '%s/%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL])
+            result_file = '%s/%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL])
 
-        cmd += ' --write-full-results-to %s' % log_file
+        cmd += ' --write-full-results-to %s' % result_file
         result = _exec(cmd)
         if result[0]:
             _warning('Failed to run test "%s"' % cmd)
 
-        # report
-        json_result = json.load(open(log_file))
-        result_type = json_result['num_failures_by_type']
-        content = 'FAIL: %s, SKIP: %s, PASS %s\n' % (result_type['FAIL'], result_type['SKIP'], result_type['PASS'])
-        test_results = json_result['tests']
-        for key, val in test_results.items():
-            parse_result(key, val, key)
+        report(force=True)
 
-        content += '[PASS_FAIL(%s)]\n' % len(pass_fail)
-        if pass_fail:
-            for c in pass_fail:
-                content += c + '\n'
-
-        content += '[FAIL_PASS(%s)]\n' % len(fail_pass)
-        if fail_pass:
-            for c in fail_pass:
-                content += c + '\n'
-
-        content += '[FAIL_FAIL(%s)]\n' % len(fail_fail)
-        if fail_fail:
-            for c in fail_fail:
-                content += c + '\n'
-
-        if host_os == 'linux':
-            subject = 'WebGL CTS on Chrome %s and Mesa %s has %s Regression' % (chrome_rev_number, mesa_rev_number, json_result['num_regressions'])
-        else:
-            subject = 'WebGL CTS on Chrome %s has %s Regression' % (chrome_rev_number, json_result['num_regressions'])
-
-        if args.daily and host_os == 'linux':
-            _send_email('webperf@intel.com', 'yang.gu@intel.com', subject, content)
-        else:
-            print(subject)
-            print(content)
+    _info('Final details:\n%s' % final_details)
+    _info('Final summary:\n%s' % final_summary)
 
 def run():
     if not args.run:
@@ -268,6 +251,52 @@ def daily():
 
     build(force=True)
     test(force=True)
+
+def report(force=False):
+    global fail_fail, fail_pass, pass_fail, pass_pass
+    global final_details, final_summary
+
+    if not args.report and not force:
+        return
+
+    json_result = json.load(open(result_file))
+    result_type = json_result['num_failures_by_type']
+    test_results = json_result['tests']
+    fail_fail = []
+    fail_pass = []
+    pass_fail = []
+    pass_pass = []
+    for key, val in test_results.items():
+        _parse_result(key, val, key)
+
+    content = 'FAIL: %s (New: %s, Expected: %s), PASS %s (New: %s, Expected: %s), SKIP: %s\n' % (result_type['FAIL'], len(pass_fail), len(fail_fail), result_type['PASS'], len(fail_pass), len(pass_pass), result_type['SKIP'])
+    final_summary += content
+    content += '[PASS_FAIL(%s)]\n' % len(pass_fail)
+    if pass_fail:
+        for c in pass_fail:
+            content += c + '\n'
+
+    content += '[FAIL_PASS(%s)]\n' % len(fail_pass)
+    if fail_pass:
+        for c in fail_pass:
+            content += c + '\n'
+
+    content += '[FAIL_FAIL(%s)]\n' % len(fail_fail)
+    if fail_fail:
+        for c in fail_fail:
+            content += c + '\n'
+
+    if host_os == 'linux':
+        subject = 'WebGL CTS on Chrome %s and Mesa %s has %s Regression' % (chrome_rev_number, mesa_rev_number, json_result['num_regressions'])
+    else:
+        subject = 'WebGL CTS on Chrome %s has %s Regression' % (chrome_rev_number, json_result['num_regressions'])
+
+    final_details += subject + '\n' + content
+    _info(subject)
+    _info(content)
+
+    if args.daily and host_os == 'linux':
+        _send_email('webperf@intel.com', 'yang.gu@intel.com', subject, content)
 
 def _sync_chrome():
     if args.proxy:
@@ -300,7 +329,6 @@ def _sync_chrome():
             content += 'proxy_user=%s\nproxy_pass=%s' % (proxy_user, proxy_pass)
         f.write(content)
         f.close()
-        print content
         _setenv('NO_AUTH_BOTO_CONFIG', script_dir + '/' + boto_file)
 
     _chdir(depot_tools_dir)
@@ -455,17 +483,21 @@ def _msg(msg):
     m = '[' + m + '] ' + msg
     print m
 
-def parse_result(key, val, path):
+def _parse_result(key, val, path):
+    global fail_fail, fail_pass, pass_fail, pass_pass
+
     if 'expected' in val:
-        if val['expected'] == 'PASS' and val['actual'] == 'FAIL':
-            pass_fail.append(path)
+        if val['expected'] == 'FAIL' and val['actual'] == 'FAIL':
+            fail_fail.append(path)
         elif val['expected'] == 'FAIL' and val['actual'] == 'PASS':
             fail_pass.append(path)
-        elif val['expected'] == 'FAIL' and val['actual'] == 'FAIL':
-            fail_fail.append(path)
+        elif val['expected'] == 'PASS' and val['actual'] == 'FAIL':
+            pass_fail.append(path)
+        elif val['expected'] == 'PASS' and val['actual'] == 'PASS':
+            pass_pass.append(path)
     else:
         for new_key, new_val in val.items():
-            parse_result(new_key, new_val, '%s/%s' % (path, new_key))
+            _parse_result(new_key, new_val, '%s/%s' % (path, new_key))
 
 
 def _send_email(sender, to, subject, content, type='plain'):
@@ -523,4 +555,5 @@ if __name__ == '__main__':
     build()
     test()
     run()
+    report()
     daily()
