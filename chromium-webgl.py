@@ -138,7 +138,7 @@ def test(force=False):
             _setenv('LIBGL_DRIVERS_PATH', mesa_dir + '/lib/dri')
             _info('Use mesa at %s' % mesa_dir)
 
-    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --disable-log-uploads'
+    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --quiet --disable-log-uploads'
     if test_chrome == 'build':
         chrome_rev_number = args.test_chrome_rev
         if chrome_rev_number == 'latest':
@@ -342,7 +342,7 @@ def _sync_chrome():
             return
 
     _chdir(chrome_src_dir)
-    _exec('git pull')
+    _exec('git clean -fd && git pull')
     cmd = 'gclient sync -D -R --break_repo_locks --delete_unversioned_trees -j%s' % cpu_count
     if chrome_rev_hash != 'latest':
         cmd += ' --revision=%s' % chrome_rev_hash
