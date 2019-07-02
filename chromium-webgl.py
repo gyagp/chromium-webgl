@@ -138,7 +138,8 @@ def test(force=False):
             _setenv('LIBGL_DRIVERS_PATH', mesa_dir + '/lib/dri')
             _info('Use mesa at %s' % mesa_dir)
 
-    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --quiet --disable-log-uploads'
+    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --disable-log-uploads'
+    extra_browser_args = ''
     if test_chrome == 'build':
         chrome_rev_number = args.test_chrome_rev
         if chrome_rev_number == 'latest':
@@ -224,12 +225,14 @@ def test(force=False):
             result_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, mesa_rev_number, comb[COMB_INDEX_WEBGL])
         elif host_os == 'windows':
             if comb[COMB_INDEX_D3D] != '11':
-                cmd += ' --extra-browser-args=--use-angle=d3d%s' % comb[COMB_INDEX_D3D]
+                extra_browser_args += ' --use-angle=d3d%s' % comb[COMB_INDEX_D3D]
             result_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL], comb[COMB_INDEX_D3D])
         elif host_os == 'darwin':
             result_file = '%s/%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL])
 
         cmd += ' --write-full-results-to %s' % result_file
+        if extra_browser_args:
+            cmd += ' --extra-browser-args="%s"' % extra_browser_args
         result = _exec(cmd)
         if result[0]:
             _warning('Failed to run test "%s"' % cmd)
@@ -269,8 +272,8 @@ def report(force=False):
     for key, val in test_results.items():
         _parse_result(key, val, key)
 
-    content = 'FAIL: %s (New: %s, Expected: %s), PASS %s (New: %s, Expected: %s), SKIP: %s\n' % (result_type['FAIL'], len(pass_fail), len(fail_fail), result_type['PASS'], len(fail_pass), len(pass_pass), result_type['SKIP'])
-    final_summary += content
+    final_summary = 'FAIL: %s (New: %s, Expected: %s), PASS %s (New: %s, Expected: %s), SKIP: %s\n\n' % (result_type['FAIL'], len(pass_fail), len(fail_fail), result_type['PASS'], len(fail_pass), len(pass_pass), result_type['SKIP'])
+    content = final_summary
     content += '[PASS_FAIL(%s)]\n' % len(pass_fail)
     if pass_fail:
         for c in pass_fail:
@@ -382,8 +385,7 @@ def _chdir(dir):
 def _ensure_dir(dir):
     if os.path.exists(dir):
         return
-
-    os.mkdir(dir)
+    os.makedirs(dir)
 
 def _ensure_nofile(file):
     if not os.path.exists(file):
