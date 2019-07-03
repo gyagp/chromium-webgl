@@ -139,7 +139,6 @@ def test(force=False):
             _info('Use mesa at %s' % mesa_dir)
 
     common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --disable-log-uploads'
-    extra_browser_args = ''
     if test_chrome == 'build':
         chrome_rev_number = args.test_chrome_rev
         if chrome_rev_number == 'latest':
@@ -219,6 +218,7 @@ def test(force=False):
             test_combs.append(all_combs[int(i)])
 
     for comb in test_combs:
+        extra_browser_args = ''
         cmd = common_cmd + ' --webgl-conformance-version=%s' % comb[COMB_INDEX_WEBGL]
         result_file = ''
         if host_os == 'linux':
