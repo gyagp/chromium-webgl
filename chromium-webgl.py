@@ -80,7 +80,7 @@ def setup():
         splitter = ';'
     elif host_os in ['linux', 'darwin']:
         splitter = ':'
-    _setenv('PATH', depot_tools_dir + splitter + os.getenv('PATH'))
+    _setenv('PATH', depot_tools_dir.replace('/', '\\') + splitter + os.getenv('PATH'))
 
     test_chrome = args.test_chrome
     if host_os == 'darwin':
@@ -225,14 +225,13 @@ def test(force=False):
             result_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, mesa_rev_number, comb[COMB_INDEX_WEBGL])
         elif host_os == 'windows':
             if comb[COMB_INDEX_D3D] != '11':
-                extra_browser_args += ' --use-angle=d3d%s' % comb[COMB_INDEX_D3D]
+                extra_browser_args += '--use-angle=d3d%s' % comb[COMB_INDEX_D3D]
             result_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL], comb[COMB_INDEX_D3D])
         elif host_os == 'darwin':
             result_file = '%s/%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL])
-
-        cmd += ' --write-full-results-to %s' % result_file
         if extra_browser_args:
             cmd += ' --extra-browser-args="%s"' % extra_browser_args
+        cmd += ' --write-full-results-to %s' % result_file
         result = _exec(cmd)
         if result[0]:
             _warning('Failed to run test "%s"' % cmd)
@@ -272,8 +271,8 @@ def report(force=False):
     for key, val in test_results.items():
         _parse_result(key, val, key)
 
-    final_summary = 'FAIL: %s (New: %s, Expected: %s), PASS %s (New: %s, Expected: %s), SKIP: %s\n\n' % (result_type['FAIL'], len(pass_fail), len(fail_fail), result_type['PASS'], len(fail_pass), len(pass_pass), result_type['SKIP'])
-    content = final_summary
+    content = 'FAIL: %s (New: %s, Expected: %s), PASS %s (New: %s, Expected: %s), SKIP: %s\n' % (result_type['FAIL'], len(pass_fail), len(fail_fail), result_type['PASS'], len(fail_pass), len(pass_pass), result_type['SKIP'])
+    final_summary += content
     content += '[PASS_FAIL(%s)]\n' % len(pass_fail)
     if pass_fail:
         for c in pass_fail:
