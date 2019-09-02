@@ -218,14 +218,14 @@ def test(force=False):
             test_combs.append(all_combs[int(i)])
 
     for comb in test_combs:
-        extra_browser_args = ''
+        extra_browser_args = '--disable-backgrounding-occluded-windows'
         cmd = common_cmd + ' --webgl-conformance-version=%s' % comb[COMB_INDEX_WEBGL]
         result_file = ''
         if host_os == 'linux':
             result_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, mesa_rev_number, comb[COMB_INDEX_WEBGL])
         elif host_os == 'windows':
             if comb[COMB_INDEX_D3D] != '11':
-                extra_browser_args += '--use-angle=d3d%s' % comb[COMB_INDEX_D3D]
+                extra_browser_args += ' --use-angle=d3d%s' % comb[COMB_INDEX_D3D]
             result_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL], comb[COMB_INDEX_D3D])
         elif host_os == 'darwin':
             result_file = '%s/%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, comb[COMB_INDEX_WEBGL])
