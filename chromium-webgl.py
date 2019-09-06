@@ -30,6 +30,8 @@ pass_fail = []
 pass_pass = []
 chrome_rev_number = 0
 mesa_rev_number = 0
+mesa_type = ''
+result_dir = ''
 result_file = ''
 final_details = ''
 final_summary = ''
@@ -64,12 +66,13 @@ examples:
     parser.add_argument('--run', dest='run', help='run', action='store_true')
     parser.add_argument('--dryrun', dest='dryrun', help='dryrun', action='store_true')
     parser.add_argument('--report', dest='report', help='report file')
+    parser.add_argument('--email', dest='email', help='send report as email', action='store_true')
     parser.add_argument('--skip-sync', dest='skip_sync', help='skip sync', action='store_true')
     parser.add_argument('--iris', dest='iris', help='use iris in Mesa', action='store_true')
     args = parser.parse_args()
 
 def setup():
-    global build_dir, chrome_src_dir, depot_tools_dir, script_dir, test_chrome, result_file
+    global build_dir, chrome_src_dir, depot_tools_dir, script_dir, test_chrome, result_dir, result_file, mesa_type
 
     root_dir = os.path.dirname(os.path.split(os.path.realpath(__file__))[0]).replace('\\', '/')
     build_dir = root_dir + '/build'
@@ -91,8 +94,12 @@ def setup():
         if test_chrome == 'default':
             test_chrome = 'build'
 
-    if args.report:
-        result_file = args.report
+    result_dir = '%s/result' % script_dir
+
+    if args.iris:
+        mesa_type = 'iris'
+    else:
+        mesa_type = 'i965'
 
 def build(force=False):
     if not args.build and not force:
@@ -198,7 +205,6 @@ def test(force=False):
     if args.test_verbose:
         common_cmd += ' --verbose'
 
-    result_dir = '%s/result' % script_dir
     _ensure_dir(result_dir)
     datetime = _get_datetime()
 
@@ -225,7 +231,7 @@ def test(force=False):
         cmd = common_cmd + ' --webgl-conformance-version=%s' % comb[COMB_INDEX_WEBGL]
         result_file = ''
         if host_os == 'linux':
-            result_file = '%s/%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, mesa_rev_number, comb[COMB_INDEX_WEBGL])
+            result_file = '%s/%s-%s-%s-%s%s.log' % (result_dir, datetime, chrome_rev_number, mesa_type, mesa_rev_number, comb[COMB_INDEX_WEBGL])
         elif host_os == 'windows':
             if comb[COMB_INDEX_D3D] != '11':
                 extra_browser_args += ' --use-angle=d3d%s' % comb[COMB_INDEX_D3D]
@@ -264,6 +270,11 @@ def report(force=False):
     if not args.report and not force:
         return
 
+    if args.report:
+        result_file = '%s/%s' % (result_dir, args.report)
+        print(result_dir)
+        print(result_file)
+
     json_result = json.load(open(result_file))
     result_type = json_result['num_failures_by_type']
     test_results = json_result['tests']
@@ -292,7 +303,7 @@ def report(force=False):
             content += c + '\n'
 
     if host_os == 'linux':
-        subject = 'WebGL CTS on Chrome %s and Mesa %s has %s Regression' % (chrome_rev_number, mesa_rev_number, json_result['num_regressions'])
+        subject = 'WebGL CTS on Chrome %s and Mesa %s %s has %s Regression' % (chrome_rev_number, mesa_type, mesa_rev_number, json_result['num_regressions'])
     else:
         subject = 'WebGL CTS on Chrome %s has %s Regression' % (chrome_rev_number, json_result['num_regressions'])
 
@@ -300,7 +311,7 @@ def report(force=False):
     _info(subject)
     _info(content)
 
-    if args.daily and host_os == 'linux':
+    if args.daily and host_os == 'linux' or args.email:
         _send_email('webperf@intel.com', 'yang.gu@intel.com', subject, content)
 
 def _sync_chrome():
