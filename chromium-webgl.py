@@ -65,6 +65,7 @@ examples:
     parser.add_argument('--dryrun', dest='dryrun', help='dryrun', action='store_true')
     parser.add_argument('--report', dest='report', help='report file')
     parser.add_argument('--skip-sync', dest='skip_sync', help='skip sync', action='store_true')
+    parser.add_argument('--iris', dest='iris', help='use iris in Mesa', action='store_true')
     args = parser.parse_args()
 
 def setup():
@@ -136,6 +137,8 @@ def test(force=False):
             mesa_dir = mesa_install_dir + '/' + mesa_dir
             _setenv('LD_LIBRARY_PATH', mesa_dir + '/lib')
             _setenv('LIBGL_DRIVERS_PATH', mesa_dir + '/lib/dri')
+            if args.iris:
+                _setenv('MESA_LOADER_DRIVER_OVERRIDE', 'iris')
             _info('Use mesa at %s' % mesa_dir)
 
     common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --disable-log-uploads'
@@ -272,7 +275,7 @@ def report(force=False):
         _parse_result(key, val, key)
 
     content = 'FAIL: %s (New: %s, Expected: %s), PASS %s (New: %s, Expected: %s), SKIP: %s\n' % (result_type['FAIL'], len(pass_fail), len(fail_fail), result_type['PASS'], len(fail_pass), len(pass_pass), result_type['SKIP'])
-    final_summary += content
+    final_summary += '\n' + content
     content += '[PASS_FAIL(%s)]\n' % len(pass_fail)
     if pass_fail:
         for c in pass_fail:
