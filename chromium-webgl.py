@@ -11,8 +11,6 @@ import smtplib
 import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from HTMLParser import HTMLParser
-
 
 boto_file = '.boto'
 cpu_count = multiprocessing.cpu_count()
@@ -144,11 +142,13 @@ def test(force=False):
             mesa_dir = mesa_install_dir + '/' + mesa_dir
             _setenv('LD_LIBRARY_PATH', mesa_dir + '/lib')
             _setenv('LIBGL_DRIVERS_PATH', mesa_dir + '/lib/dri')
-            if args.iris:
+            if mesa_type == 'iris':
                 _setenv('MESA_LOADER_DRIVER_OVERRIDE', 'iris')
+            else:
+                _setenv('MESA_LOADER_DRIVER_OVERRIDE', '')
             _info('Use mesa at %s' % mesa_dir)
 
-    common_cmd = 'python content/test/gpu/run_gpu_integration_test.py webgl_conformance --disable-log-uploads'
+    common_cmd = 'vpython content/test/gpu/run_gpu_integration_test.py webgl_conformance --disable-log-uploads'
     if test_chrome == 'build':
         chrome_rev_number = args.test_chrome_rev
         if chrome_rev_number == 'latest':
@@ -231,7 +231,7 @@ def test(force=False):
         cmd = common_cmd + ' --webgl-conformance-version=%s' % comb[COMB_INDEX_WEBGL]
         result_file = ''
         if host_os == 'linux':
-            result_file = '%s/%s-%s-%s-%s%s.log' % (result_dir, datetime, chrome_rev_number, mesa_type, mesa_rev_number, comb[COMB_INDEX_WEBGL])
+            result_file = '%s/%s-%s-%s-%s-%s.log' % (result_dir, datetime, chrome_rev_number, mesa_type, mesa_rev_number, comb[COMB_INDEX_WEBGL])
         elif host_os == 'windows':
             if comb[COMB_INDEX_D3D] != '11':
                 extra_browser_args += ' --use-angle=d3d%s' % comb[COMB_INDEX_D3D]
@@ -257,14 +257,17 @@ def run():
     test(force=True)
 
 def daily():
+    global mesa_type
     if not args.daily:
         return
 
     build(force=True)
     test(force=True)
+    mesa_type = 'iris'
+    test(force=True)
 
 def report(force=False):
-    global fail_fail, fail_pass, pass_fail, pass_pass
+    global fail_fail, fail_pass, pass_fail, pass_pass, result_file
     global final_details, final_summary
 
     if not args.report and not force:
@@ -272,8 +275,6 @@ def report(force=False):
 
     if args.report:
         result_file = '%s/%s' % (result_dir, args.report)
-        print(result_dir)
-        print(result_file)
 
     json_result = json.load(open(result_file))
     result_type = json_result['num_failures_by_type']
@@ -386,7 +387,7 @@ def _build_chrome():
         _error('Failed to build Chromium')
 
     # generate telemetry_gpu_integration_test
-    cmd = 'python tools/mb/mb.py zip out/Default/ telemetry_gpu_integration_test %s/%s.zip' % (build_dir, chrome_rev_number)
+    cmd = 'vpython tools/mb/mb.py zip out/Default/ telemetry_gpu_integration_test %s/%s.zip' % (build_dir, chrome_rev_number)
     result = _exec(cmd)
     if result[0]:
         _error('Failed to generate telemetry_gpu_integration_test')
@@ -496,7 +497,7 @@ def _warning(warning):
 def _msg(msg):
     m = inspect.stack()[1][3].upper().lstrip('_')
     m = '[' + m + '] ' + msg
-    print m
+    print(m)
 
 def _parse_result(key, val, path):
     global fail_fail, fail_pass, pass_fail, pass_pass
@@ -534,35 +535,6 @@ def _send_email(sender, to, subject, content, type='plain'):
         _error('Failed to send mail: %s' % e)
     finally:
         smtp.quit()
-
-class Parser(HTMLParser):
-    def __init__(self):
-        HTMLParser.__init__(self)
-        self.is_tr = False
-        self.tag_count = 0
-        self.chrome_rev_hash = ''
-        self.rev_result = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag == 'tr':
-            self.is_tr = True
-
-    def handle_endtag(self, tag):
-        if tag == 'tr':
-            self.is_tr = False
-
-    def handle_data(self, data):
-        if self.is_tr:
-            if self.tag_count == 3:
-                self.rev_result.append([self.chrome_rev_hash, data])
-                self.tag_count = 0
-            elif self.tag_count > 0:
-                self.tag_count = self.tag_count + 1
-            match = re.search('([a-z0-9]{40})', data)
-            if match:
-                self.chrome_rev_hash = match.group(1)
-                self.tag_count = 1
-
 
 if __name__ == '__main__':
     parse_arg()
