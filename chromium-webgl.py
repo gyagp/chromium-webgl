@@ -66,7 +66,8 @@ examples:
     parser.add_argument('--report', dest='report', help='report file')
     parser.add_argument('--email', dest='email', help='send report as email', action='store_true')
     parser.add_argument('--skip-sync', dest='skip_sync', help='skip sync', action='store_true')
-    parser.add_argument('--iris', dest='iris', help='use iris in Mesa', action='store_true')
+    parser.add_argument('--mesa-type', dest='mesa_type', help='mesa type', default='i965,iris')
+
     args = parser.parse_args()
 
 def setup():
@@ -93,11 +94,6 @@ def setup():
             test_chrome = 'build'
 
     result_dir = '%s/result' % script_dir
-
-    if args.iris:
-        mesa_type = 'iris'
-    else:
-        mesa_type = 'i965'
 
 def build(force=False):
     if not args.build and not force:
@@ -262,9 +258,12 @@ def daily():
         return
 
     build(force=True)
-    test(force=True)
-    mesa_type = 'iris'
-    test(force=True)
+    if host_os == 'linux':
+        for type in args.mesa_type.split(','):
+            mesa_type = type
+            test(force=True)
+    else:
+        test(force=True)
 
 def report(force=False):
     global fail_fail, fail_pass, pass_fail, pass_pass, result_file
