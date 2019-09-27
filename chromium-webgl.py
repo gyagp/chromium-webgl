@@ -28,7 +28,7 @@ pass_fail = []
 pass_pass = []
 chrome_rev_number = 0
 mesa_rev_number = 0
-mesa_type = ''
+mesa_types = []
 result_dir = ''
 result_file = ''
 final_details = ''
@@ -71,7 +71,7 @@ examples:
     args = parser.parse_args()
 
 def setup():
-    global build_dir, chrome_src_dir, depot_tools_dir, script_dir, test_chrome, result_dir, result_file, mesa_type
+    global build_dir, chrome_src_dir, depot_tools_dir, script_dir, test_chrome, result_dir, result_file, mesa_types
 
     root_dir = os.path.dirname(os.path.split(os.path.realpath(__file__))[0]).replace('\\', '/')
     build_dir = root_dir + '/build'
@@ -95,6 +95,8 @@ def setup():
 
     result_dir = '%s/result' % script_dir
 
+    mesa_types = args.mesa_type.split(',')
+
 def build(force=False):
     if not args.build and not force:
         return
@@ -111,7 +113,7 @@ def build(force=False):
     if test_chrome == 'build':
         _build_chrome()
 
-def test(force=False):
+def test(force=False, mesa_type=''):
     global chrome_rev_number, mesa_rev_number, result_file
 
     if not args.test and not force:
@@ -241,7 +243,7 @@ def test(force=False):
         if result[0]:
             _warning('Failed to run test "%s"' % cmd)
 
-        report(force=True)
+        report(force=True, mesa_type=mesa_type)
 
     _info('Final details:\n%s' % final_details)
     _info('Final summary:\n%s' % final_summary)
@@ -250,22 +252,26 @@ def run():
     if not args.run:
         return
 
-    test(force=True)
+    if host_os == 'linux':
+        if len(mesa_types) > 1:
+            _error('Only one mesa_type is support for run')
+        mesa_type = mesa_types[0]
+        test(force=True, mesa_type=mesa_type)
+    else:
+        test(force=True)
 
 def daily():
-    global mesa_type
     if not args.daily:
         return
 
     build(force=True)
     if host_os == 'linux':
-        for type in args.mesa_type.split(','):
-            mesa_type = type
-            test(force=True)
+        for mesa_type in mesa_types:
+            test(force=True, mesa_type=mesa_type)
     else:
         test(force=True)
 
-def report(force=False):
+def report(force=False, mesa_type=''):
     global fail_fail, fail_pass, pass_fail, pass_pass, result_file
     global final_details, final_summary
 
