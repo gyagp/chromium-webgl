@@ -423,12 +423,10 @@ def _exec(cmd, return_out=False, show_cmd=True, show_duration=False, dryrun=Fals
         result = [0, '']
     else:
         if return_out:
-            tmp_out = ''
             process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (out, err) = process.communicate()
-            out = tmp_out + out
             ret = process.returncode
-            result = [ret, out + err]
+            result = [ret, (out + err).decode('utf-8')]
         else:
             ret = os.system(cmd)
             result = [ret / 256, '']
